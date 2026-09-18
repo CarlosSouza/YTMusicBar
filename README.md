@@ -1,23 +1,24 @@
 # YTMusicBar
 
-Cliente autônomo do YouTube Music para a barra de menus do macOS 14+, feito em SwiftUI, `ytmusicapi`, `yt-dlp` e `mpv`. O app segue a arquitetura do widget `quickshell.ytmusic` do Omarchy e reaproveita a abordagem de empacotamento local do UsageBar.
+A standalone YouTube Music client for the macOS 14+ menu bar, built with SwiftUI, `ytmusicapi`, `yt-dlp` and `mpv`. The architecture follows the Omarchy `omarchy-ytmusic` widget (Quickshell UI plus local mpv playback) and reuses the local packaging approach of [UsageBar](https://github.com/CarlosSouza/UsageBar).
 
-O catálogo é consultado pelo protocolo local do `ytmusicapi`. A reprodução usa um único `mpv` persistente, que resolve o áudio sozinho pelo `ytdl_hook` (apontado para o `yt-dlp` do Homebrew) e mantém a fila de faixas. Não há Safari, Chrome, WebView, Apple Events ou login embutido.
+The catalog is queried through `ytmusicapi`'s local protocol. Playback uses a single persistent `mpv` that resolves the audio itself through `ytdl_hook` (pointed at the Homebrew `yt-dlp`) and keeps the track queue. There is no Safari, Chrome, WebView, Apple Events or embedded login.
 
-## Recursos
+## Features
 
-- tudo acontece no popover da barra de menus, sem nenhuma janela: player com capa, progresso arrastável, transporte e volume; busca; abas Biblioteca, Playlists e Resultados em uma lista rolável; Ajustes e Configurar acesso como páginas internas;
-- reprodução local em segundo plano por um único mpv, reaproveitado entre cliques;
-- ao tocar uma música, a lista onde ela estava (biblioteca ou resultados) entra na fila a partir dela; playlists entram inteiras. Anterior e próxima navegam pela fila;
-- nome da faixa na barra de menus, com capa, artista, álbum e progresso no popover;
-- reproduzir/pausar, anterior (reinicia a faixa depois de 3 s), próxima, arrastar o progresso;
-- curtir ou remover a curtida da faixa atual, com o estado inicial consultado no servidor;
-- volume e mudo do mpv;
-- nenhum acesso por Apple Events e nenhuma permissão de Automação do macOS.
+- Everything lives in the menu bar popover, with no windows: player with artwork, draggable progress, transport and volume; search; Queue, Library, Playlists and Results tabs in a scrollable list; Settings and Connect as internal pages.
+- Local background playback by a single mpv, reused across clicks.
+- Playing a song queues the list it was clicked in (library or results) starting from that song; playlists are queued whole. Previous and next move through the queue.
+- The Queue tab shows played tracks dimmed, the current one highlighted and the upcoming ones; clicking a row jumps to it.
+- Track name in the menu bar, with artwork, artist, album and progress in the popover.
+- Play/pause, previous (restarts the track after 3 s), next, drag to seek.
+- Like or unlike the current track, with the initial state fetched from the server.
+- mpv volume and mute.
+- No Apple Events and no macOS Automation permission.
 
-## Compilar
+## Build
 
-Pré-requisitos: macOS 14+, Command Line Tools ou Xcode com Swift 6, e Homebrew com `mpv` e `yt-dlp`. O `ytmusicapi` fica em um venv local que o build copia para dentro do app.
+Requirements: macOS 14+, Command Line Tools or Xcode with Swift 6, and Homebrew with `mpv` and `yt-dlp`. `ytmusicapi` lives in a local venv that the build copies into the app bundle.
 
 ```sh
 brew install mpv yt-dlp
@@ -29,23 +30,23 @@ bash scripts/build-app.sh
 open dist/YTMusicBar.app
 ```
 
-O script gera um app com assinatura ad hoc para uso local. Para distribuição pública ainda são necessários Developer ID, notarização e um ícone próprio.
+The script produces an ad hoc signed app for local use. Public distribution still needs a Developer ID, notarization and a proper icon.
 
-## Primeiro uso
+## First run
 
-1. Abra o YTMusicBar pela barra de menus.
-2. Clique em **Configurar acesso…**. A página explica cada passo, abre o YouTube Music e recebe os headers colados diretamente no popover. Não é preciso abrir o Terminal.
-3. Depois de salvar, use a busca ou a aba Biblioteca e clique em uma música; o nome e os controles passam a aparecer no popover e o título na barra de menus.
+1. Open YTMusicBar from the menu bar.
+2. Click **Configure access…**. The page explains each step, opens YouTube Music and takes the headers pasted directly into the popover. No Terminal needed.
+3. After saving, use search or the Library tab and click a song; the controls appear in the popover and the title in the menu bar.
 
-Os headers ficam em `~/Library/Application Support/YTMusicBar/ytmusic-auth.json` e são usados somente pelo bridge local. O navegador não é necessário depois da configuração. Eles são credenciais sensíveis e não devem ser compartilhados.
+The headers are stored in `~/Library/Application Support/YTMusicBar/ytmusic-auth.json` and used only by the local bridge. The browser is not needed after setup. They are sensitive credentials and must not be shared.
 
-## Biblioteca, playlists e busca
+## Library, playlists and search
 
-O popover tem as abas Biblioteca e Playlists, e a aba Resultados aparece depois de uma busca. Clicar em uma música coloca na fila a lista inteira onde ela estava, começando por ela; clicar em uma playlist carrega todas as faixas disponíveis. Quando a fila termina, a última faixa fica visível pausada e o botão de reproduzir a reinicia. Cliques rápidos são serializados pelo bridge e o último vence, sempre com um único processo `mpv`. Fechar o popover mantém a reprodução. Sair (ou Cmd-Q) para o mpv antes de o processo terminar.
+The popover has Library and Playlists tabs; the Results tab appears after a search and the Queue tab while something is loaded. Clicking a song queues the whole list it was in, starting from it; clicking a playlist loads every available track. When the queue ends, the last track stays visible, paused, and the play button restarts it. Rapid clicks are serialized by the bridge and the last one wins, always with a single `mpv` process. Closing the popover keeps playing. Quit (or Cmd-Q) stops mpv before the process exits.
 
-O estado do player fica em `~/Library/Application Support/YTMusicBar/` (`queue.json`, `queue.m3u`, `mpv.pid`, `player.lock`); o socket IPC do mpv é `ytmusicbar-mpv.sock` no diretório temporário do usuário.
+Player state lives in `~/Library/Application Support/YTMusicBar/` (`queue.json`, `queue.m3u`, `mpv.pid`, `player.lock`); the mpv IPC socket is `ytmusicbar-mpv.sock` in the user's temporary directory.
 
-## Verificar
+## Verify
 
 ```sh
 CLANG_MODULE_CACHE_PATH=/private/tmp/ytmusicbar-clang \
@@ -60,21 +61,28 @@ plutil -lint dist/YTMusicBar.app/Contents/Info.plist
 codesign --verify --deep --strict dist/YTMusicBar.app
 ```
 
-Os checks cobrem URLs, avanço do progresso, formatação de duração, o bridge Python e a presença de `mpv`/`yt-dlp`.
+The checks cover URLs, progress estimation, duration formatting, queue ids, the Python bridge and the presence of `mpv`/`yt-dlp`.
 
-## Limites conhecidos
+## Known limits
 
-- `ytmusicapi` e `yt-dlp` dependem de APIs/protocolos internos do YouTube e podem exigir atualização;
-- os headers de autenticação podem expirar ou precisar ser refeitos;
-- o app não contorna anúncios, DRM, restrições geográficas ou requisitos do YouTube Premium;
-- a versão local usa assinatura ad hoc e não está pronta para distribuição fora desta máquina.
+- `ytmusicapi` and `yt-dlp` depend on YouTube's internal APIs and protocols and may need updates.
+- Authentication headers can expire and need to be redone.
+- The app does not bypass ads, DRM, geographic restrictions or YouTube Premium requirements.
+- The local build is ad hoc signed and not ready for distribution outside this machine.
 
-## Estrutura
+## Layout
 
-- `Sources/YTMusicCore`: estado de reprodução, URLs e lógica testável;
-- `Sources/YTMusicBar/LocalMusicPlayer.swift`: bridge Swift para catálogo e reprodução local;
-- `scripts/ytmusic_bridge.py`: `ytmusicapi`, ciclo de vida do mpv único e fila via IPC;
-- `Sources/YTMusicBar/App.swift`: popover completo (player, catálogo, ajustes, configuração de acesso);
-- `Sources/YTMusicBar/Store.swift`: estado observável, aba ativa, busca, polling e encerramento gracioso;
-- `scripts/build-app.sh`: empacotamento `.app` local;
-- `Tests/YTMusicCoreTests`: checks sem rede.
+- `Sources/YTMusicCore`: playback state, URLs and testable logic.
+- `Sources/YTMusicBar/LocalMusicPlayer.swift`: Swift bridge for catalog and local playback.
+- `scripts/ytmusic_bridge.py`: `ytmusicapi`, single-mpv lifecycle and queue over IPC.
+- `Sources/YTMusicBar/App.swift`: the whole popover (player, catalog, settings, access setup).
+- `Sources/YTMusicBar/Store.swift`: observable state, active tab, search, polling and graceful shutdown.
+- `scripts/build-app.sh`: local `.app` packaging.
+- `Tests/YTMusicCoreTests`: offline checks.
+- `docs/architecture.md`: architecture notes (in Portuguese).
+
+## Credits and license
+
+Licensed under the [MIT License](LICENSE).
+
+The design follows [omarchy-ytmusic](https://github.com/leoriohub/omarchy-ytmusic) by rlimberger, itself derived from Omarchy-Spotify, both MIT licensed: Copyright (c) 2026 Omarchy Spotify contributors, Copyright (c) 2026 rlimberger.
