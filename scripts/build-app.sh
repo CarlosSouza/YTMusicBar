@@ -35,6 +35,7 @@ if [[ -e "$app_path/Contents/Resources/.ytmusic-venv" ]]; then
 fi
 cp "$binary_dir/YTMusicBar" "$app_path/Contents/MacOS/YTMusicBar"
 cp README.md "$app_path/Contents/Resources/README.md"
+cp Assets/YTMusicBar.png "$app_path/Contents/Resources/YTMusicBar.png"
 cp scripts/ytmusic_bridge.py "$app_path/Contents/Resources/ytmusic_bridge.py"
 cp scripts/ytmusic_auth.py "$app_path/Contents/Resources/ytmusic_auth.py"
 site_packages_dir="$(find .ytmusic-venv/lib -type d -name site-packages -print -quit 2>/dev/null || true)"
@@ -51,6 +52,7 @@ cat > "$app_path/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key><string>local.ytmusicbar</string>
     <key>CFBundleName</key><string>YTMusicBar</string>
     <key>CFBundleDisplayName</key><string>YTMusicBar</string>
+    <key>CFBundleIconFile</key><string>YTMusicBar.png</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.3.0</string>
     <key>CFBundleVersion</key><string>3</string>

@@ -30,7 +30,7 @@ bash scripts/build-app.sh
 open dist/YTMusicBar.app
 ```
 
-The script produces an ad hoc signed app for local use. Public distribution still needs a Developer ID, notarization and a proper icon.
+The script produces an ad hoc signed app for local use. Public distribution still needs a Developer ID and notarization.
 
 ## First run
 
