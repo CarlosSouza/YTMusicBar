@@ -62,6 +62,9 @@ struct YTMusicBarApp: App {
 private final class TextDraft: ObservableObject { @Published var text = "" }
 private final class HoverState: ObservableObject { @Published var isHovering = false }
 private final class DragState: ObservableObject { @Published var value: Double? }
+/// Drives the skeleton pulse. `@State` is a macro in this SDK and its plugin does not resolve under
+/// SwiftPM here, so every piece of view state in this file is an `ObservableObject` instead.
+private final class PulseState: ObservableObject { @Published var dim = false }
 private final class AuthDraft: ObservableObject {
     @Published var headers = ""
     @Published var isSaving = false
@@ -292,7 +295,13 @@ private struct CatalogList: View {
         let items = store.visibleItems
         ZStack {
             if store.isCatalogLoading && items.isEmpty {
-                ProgressView("Carregando…").frame(maxWidth: .infinity, maxHeight: .infinity).transition(.opacity)
+                SkeletonList(
+                    rows: 7,
+                    leading: store.catalogTab == .forYou ? 32 : 40,
+                    showsChevron: store.catalogTab == .forYou
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .transition(.opacity)
             } else if store.catalogTab == .forYou, store.forYouOpenSection == nil, !store.homeSections.isEmpty {
                 categoryMenu
             } else if items.isEmpty {
@@ -383,6 +392,50 @@ private struct CatalogList: View {
         case .forYou: "Nada para você agora."
         case .results: "Nenhuma música encontrada para “\(store.lastQuery)”."
         }
+    }
+}
+
+/// Placeholder rows shown while a catalog page loads, drawn like the rows that will replace them so
+/// the panel keeps its shape instead of collapsing to a spinner.
+private struct SkeletonList: View {
+    var rows: Int = 7
+    var leading: CGFloat = 40
+    var showsChevron = false
+    @StateObject private var pulse = PulseState()
+
+    private static let titleWidths: [CGFloat] = [190, 150, 215, 170, 130, 200, 160]
+    private static let subtitleWidths: [CGFloat] = [110, 90, 130, 100, 80, 120, 95]
+
+    var body: some View {
+        VStack(spacing: 2) {
+            ForEach(0..<rows, id: \.self) { index in
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(.quaternary)
+                        .frame(width: leading, height: leading)
+                    VStack(alignment: .leading, spacing: 6) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(.quaternary)
+                            .frame(width: Self.titleWidths[index % Self.titleWidths.count], height: 11)
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(.quaternary)
+                            .frame(width: Self.subtitleWidths[index % Self.subtitleWidths.count], height: 9)
+                    }
+                    Spacer(minLength: 8)
+                    if showsChevron {
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.quaternary)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .opacity(pulse.dim ? 0.4 : 1)
+            }
+        }
+        .padding(.vertical, 2)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) { pulse.dim = true }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Carregando")
     }
 }
 
