@@ -259,8 +259,10 @@ private struct LocalMusicBridge {
             input.fileHandleForWriting.write(data)
             input.fileHandleForWriting.write(Data("\n".utf8))
             try input.fileHandleForWriting.close()
-            process.waitUntilExit()
+            // Read before waiting. A reply larger than the pipe buffer (~64KB, and a radio queue is
+            // about 72KB) blocks the child on write while we block on exit, and neither ever moves.
             let outputData = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
             guard let line = String(data: outputData, encoding: .utf8)?.split(separator: "\n").first,
                   let json = line.data(using: .utf8) else { throw LocalMusicError.noReply }
             let reply = try JSONDecoder().decode(Reply.self, from: json)
