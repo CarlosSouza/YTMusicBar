@@ -52,8 +52,17 @@ final class PlayerStore: ObservableObject {
     @Published private(set) var navigatedForward = true
 
     @Published var catalogTab: CatalogTab = .library {
-        didSet { if catalogTab != oldValue { loadIfNeeded(catalogTab) } }
+        didSet {
+            if catalogTab != oldValue {
+                // Leaving the tab drops back to the category menu, so it always opens the same way.
+                if catalogTab != .forYou { forYouSectionID = nil }
+                loadIfNeeded(catalogTab)
+            }
+        }
     }
+
+    /// Title of the home row open in the "Para você" tab; nil shows the category menu.
+    @Published private(set) var forYouSectionID: String?
 
     @Published var showTrackInMenuBar: Bool {
         didSet { defaults.set(showTrackInMenuBar, forKey: "showTrackInMenuBar") }
@@ -122,10 +131,20 @@ final class PlayerStore: ObservableObject {
         case .queue: queueItems
         case .library: librarySongs
         case .playlists: playlists
-        case .forYou: homeSections.flatMap(\.items)
+        case .forYou: forYouOpenSection?.items ?? []
         case .results: searchResults
         }
     }
+
+    /// The home row currently open, looked up by title so a refresh cannot leave a stale copy open.
+    var forYouOpenSection: HomeSection? {
+        guard let forYouSectionID else { return nil }
+        return homeSections.first { $0.id == forYouSectionID }
+    }
+
+    func openForYouSection(_ section: HomeSection) { forYouSectionID = section.id }
+
+    func closeForYouSection() { forYouSectionID = nil }
 
     func isCurrent(_ item: MediaItem) -> Bool {
         guard item.kind == .song, let id = snapshot?.videoID, !id.isEmpty else { return false }

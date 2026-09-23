@@ -258,6 +258,10 @@ private struct PlayerHome: View {
 
     private var footerText: String {
         if store.isCatalogLoading { return "Carregando…" }
+        if store.catalogTab == .forYou, store.forYouOpenSection == nil {
+            let sections = store.homeSections.count
+            return sections == 1 ? "1 categoria" : "\(sections) categorias"
+        }
         let count = store.visibleItems.count
         guard count > 0 else { return store.connectionMessage }
         return count == 1 ? "1 item" : "\(count) itens"
@@ -289,6 +293,8 @@ private struct CatalogList: View {
         ZStack {
             if store.isCatalogLoading && items.isEmpty {
                 ProgressView("Carregando…").frame(maxWidth: .infinity, maxHeight: .infinity).transition(.opacity)
+            } else if store.catalogTab == .forYou, store.forYouOpenSection == nil, !store.homeSections.isEmpty {
+                categoryMenu
             } else if items.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: emptyIcon).font(.title2).foregroundStyle(.tertiary)
@@ -304,28 +310,22 @@ private struct CatalogList: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.opacity)
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 2) {
-                            if store.catalogTab == .forYou {
-                                ForEach(store.homeSections) { section in
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        SectionHeader(title: section.title)
-                                        ForEach(Array(section.items.enumerated()), id: \.offset) { index, item in
-                                            row(item, in: section.items, index: index)
-                                        }
-                                    }
-                                }
-                            } else {
+                VStack(spacing: 2) {
+                    if let section = store.forYouOpenSection {
+                        SectionBackRow(title: section.title) { store.closeForYouSection() }
+                    }
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 2) {
                                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                                     row(item, in: items, index: index).id(index)
                                 }
                             }
+                            .padding(.vertical, 2)
                         }
-                        .padding(.vertical, 2)
+                        .onAppear { scrollToCurrent(proxy, animated: false) }
+                        .onChange(of: store.snapshot?.queueIndex) { _, _ in scrollToCurrent(proxy, animated: true) }
                     }
-                    .onAppear { scrollToCurrent(proxy, animated: false) }
-                    .onChange(of: store.snapshot?.queueIndex) { _, _ in scrollToCurrent(proxy, animated: true) }
                 }
                 .id(store.catalogTab)
                 .transition(.opacity)
@@ -333,7 +333,21 @@ private struct CatalogList: View {
         }
         .animation(AppTheme.swap, value: store.catalogTab)
         .animation(AppTheme.swap, value: items.isEmpty)
+        .animation(AppTheme.swap, value: store.forYouOpenSection)
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// The home rows as a compact index: the popover is too short to scroll through all of them.
+    private var categoryMenu: some View {
+        ScrollView {
+            LazyVStack(spacing: 2) {
+                ForEach(store.homeSections) { section in
+                    SectionRow(section: section) { store.openForYouSection(section) }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .transition(.opacity)
     }
 
     private func row(_ item: MediaItem, in list: [MediaItem], index: Int) -> some View {
@@ -372,17 +386,89 @@ private struct CatalogList: View {
     }
 }
 
-private struct SectionHeader: View {
-    let title: String
+/// The home rows are dynamic, so the icon comes from the words YouTube uses, with a fallback.
+private enum SectionIcon {
+    private static let rules: [(String, String)] = [
+        ("listen again", "clock.arrow.circlepath"),
+        ("tocar de novo", "clock.arrow.circlepath"),
+        ("mix", "sparkles"),
+        ("quick pick", "wand.and.stars"),
+        ("discover", "safari"),
+        ("new release", "star.circle"),
+        ("album", "square.stack"),
+        ("recap", "calendar"),
+        ("community", "person.2"),
+        ("trending", "chart.line.uptrend.xyaxis"),
+        ("chart", "chart.bar"),
+        ("live", "dot.radiowaves.left.and.right"),
+        ("video", "play.rectangle"),
+        ("fresh", "leaf"),
+        ("forgotten", "clock.badge.questionmark"),
+        ("favorite", "heart"),
+    ]
+
+    static func name(for title: String) -> String {
+        let name = title.lowercased()
+        return rules.first { name.contains($0.0) }?.1 ?? "music.note.list"
+    }
+}
+
+/// One row of the "Para você" index: icon, title and how much is inside.
+private struct SectionRow: View {
+    let section: HomeSection
+    let open: () -> Void
+    @StateObject private var hover = HoverState()
 
     var body: some View {
-        Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.top, 10)
-            .padding(.bottom, 2)
+        Button(action: open) {
+            HStack(spacing: 10) {
+                Image(systemName: SectionIcon.name(for: section.title))
+                    .font(.callout)
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 32, height: 32)
+                    .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(section.title).font(.callout).lineLimit(1)
+                    Text(section.items.count == 1 ? "1 item" : "\(section.items.count) itens")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(hover.isHovering ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScaleStyle(scale: 0.985))
+        .padding(.horizontal, 4)
+        .onHover { hover.isHovering = $0 }
+        .animation(AppTheme.hover, value: hover.isHovering)
+        .help("Abrir \(section.title)")
+    }
+}
+
+/// Sits above the rows of an open category and returns to the index.
+private struct SectionBackRow: View {
+    let title: String
+    let back: () -> Void
+    @StateObject private var hover = HoverState()
+
+    var body: some View {
+        Button(action: back) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left").font(.caption.weight(.semibold))
+                Text("Categorias").font(.caption)
+                Spacer()
+                Text(title).font(.caption.weight(.semibold)).lineLimit(1).foregroundStyle(.secondary)
+            }
+            .foregroundStyle(hover.isHovering ? Color.primary : Color.secondary)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScaleStyle(scale: 0.99))
+        .onHover { hover.isHovering = $0 }
+        .animation(AppTheme.hover, value: hover.isHovering)
+        .help("Voltar para as categorias")
     }
 }
 
