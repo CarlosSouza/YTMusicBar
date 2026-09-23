@@ -210,6 +210,8 @@ final class PlayerStore: ObservableObject {
             do {
                 try await player.playRadio(id: id)
                 queueItems = []
+                // A radio has no list of origin to keep in view, so show what it queued.
+                catalogTab = .queue
                 await refresh()
             } catch is CancellationError {
             } catch { actionMessage = error.localizedDescription }
