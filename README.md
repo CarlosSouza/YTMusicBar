@@ -14,7 +14,7 @@ The catalog is queried through `ytmusicapi`'s local protocol. Playback uses a si
 - The Queue tab shows played tracks dimmed, the current one highlighted and the upcoming ones; clicking a row jumps to it.
 - Track name in the menu bar, with artwork, artist, album and progress in the popover.
 - Play/pause, previous (restarts the track after 3 s), next, drag to seek.
-- Like or unlike the current track, with the initial state fetched from the server.
+- Like or unlike the current track, applied to the heart immediately and reconciled with the server in the background.
 - mpv volume and mute.
 - No Apple Events and no macOS Automation permission.
 
@@ -78,7 +78,8 @@ The checks cover URLs, progress estimation, duration formatting, queue ids and t
 ## Known limits
 
 - `ytmusicapi` and `yt-dlp` depend on YouTube's internal APIs and protocols and may need updates.
-- Authentication cookies expire and have to be imported again. `ytmusicapi` does not rotate the `__Secure-*PSIDTS` cookies that the browser refreshes, which is the usual reason a working session goes stale.
+- Starting a track is not instant: mpv resolves the stream with `yt-dlp` first, which takes a second or two. The progress bar shows a spinner during that window instead of counting from zero, and the row keeps its spinner until audio actually starts.
+- Authentication cookies expire. Signing in now happens in a `WKWebView` the app owns, so the session is in WebKit's cookie store rather than a copy taken from another browser, but the app does not yet re-read that store when its stored copy goes stale.
 - The app does not bypass ads, DRM, geographic restrictions or YouTube Premium requirements.
 - The local build is ad hoc signed and not ready for distribution outside this machine.
 

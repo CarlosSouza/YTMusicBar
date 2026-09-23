@@ -11,6 +11,9 @@ public struct PlaybackSnapshot: Codable, Equatable, Sendable {
     public let volume: Double
     public let isMuted: Bool
     public let isLiked: Bool?
+    /// True while mpv holds the track but has not started producing audio yet, which is how long
+    /// yt-dlp takes to resolve the stream. Nothing is playing, so the position must not advance.
+    public let isPreparing: Bool
     public let pageURL: URL?
     public let queueIndex: Int
     public let queueCount: Int
@@ -27,6 +30,7 @@ public struct PlaybackSnapshot: Codable, Equatable, Sendable {
         volume: Double,
         isMuted: Bool,
         isLiked: Bool? = nil,
+        isPreparing: Bool = false,
         pageURL: URL?,
         queueIndex: Int = 0,
         queueCount: Int = 1,
@@ -42,6 +46,7 @@ public struct PlaybackSnapshot: Codable, Equatable, Sendable {
         self.volume = volume.isFinite ? min(max(volume, 0), 1) : 0
         self.isMuted = isMuted
         self.isLiked = isLiked
+        self.isPreparing = isPreparing
         self.pageURL = pageURL
         self.queueIndex = max(0, queueIndex)
         self.queueCount = max(1, queueCount)
@@ -55,7 +60,7 @@ public struct PlaybackSnapshot: Codable, Equatable, Sendable {
     public var hasNext: Bool { queueIndex < queueCount - 1 }
 
     public func estimatedTime(at date: Date) -> Double {
-        guard !isPaused, duration > 0 else { return min(currentTime, duration) }
+        guard !isPaused, !isPreparing, duration > 0 else { return min(currentTime, duration) }
         return min(max(0, currentTime + max(0, date.timeIntervalSince(observedAt))), duration)
     }
 }
@@ -67,7 +72,6 @@ public enum PlaybackAction: Equatable, Sendable {
     case seek(to: Double)
     case setVolume(Double)
     case toggleMute
-    case toggleLike
     /// Jump to a position of the current queue.
     case jump(to: Int)
 }

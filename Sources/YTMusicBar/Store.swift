@@ -24,6 +24,12 @@ enum CatalogTab: String, CaseIterable, Identifiable {
 /// Pages of the menu bar popover. Everything, including settings and access setup, lives here.
 enum PanelPage: Hashable { case player, settings, auth }
 
+/// Like state to show while the server round trip is still in flight.
+struct PendingLike: Equatable {
+    let id: String
+    let liked: Bool
+}
+
 @MainActor
 final class PlayerStore: ObservableObject {
     @Published private(set) var snapshot: PlaybackSnapshot?
@@ -38,6 +44,8 @@ final class PlayerStore: ObservableObject {
     @Published private(set) var isCatalogLoading = false
     @Published private(set) var catalogMessage: String?
     @Published private(set) var loadingItemID: String?
+    /// Like state shown while the server round trip is in flight.
+    @Published private(set) var pendingLike: PendingLike?
     @Published private(set) var lastQuery = ""
     @Published private(set) var panelPage: PanelPage = .player
     /// True when the last navigation went deeper (player → settings → auth); drives the slide direction.
@@ -55,6 +63,7 @@ final class PlayerStore: ObservableObject {
     private let defaults: UserDefaults
     private var pollTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
+    private var likeToken: UUID?
     private var playerObservation: AnyCancellable?
     private var catalogLoadedAt: [CatalogTab: Date] = [:]
     /// Catalog data older than this is reloaded the next time the popover opens.
@@ -115,6 +124,8 @@ final class PlayerStore: ObservableObject {
             snapshot = try await player.snapshot()
             connectionMessage = snapshot == nil ? player.statusMessage : (snapshot?.isPaused == true ? "Pausado" : "Reproduzindo")
         } catch { connectionMessage = error.localizedDescription }
+        // The clicked row keeps its spinner until mpv actually starts producing audio.
+        if snapshot?.isPreparing == false, loadingItemID != nil { loadingItemID = nil }
         if snapshot == nil {
             queueItems = []
             if catalogTab == .queue { catalogTab = .library }
@@ -167,11 +178,35 @@ final class PlayerStore: ObservableObject {
     func previous() { perform(.previous) }
     func next() { perform(.next) }
     func toggleMute() { perform(.toggleMute) }
-    func toggleLike() { perform(.toggleLike) }
     func seek(to seconds: Double) { perform(.seek(to: max(0, seconds))) }
     func skip(_ seconds: Double) { if let snapshot { seek(to: snapshot.estimatedTime(at: Date()) + seconds) } }
     func setVolume(_ volume: Double) { perform(.setVolume(min(max(volume, 0), 1))) }
     func stopAndQuit() { NSApp.terminate(nil) }
+
+    /// What the heart should show: the optimistic value wins until the server confirms it.
+    func isLiked(_ snapshot: PlaybackSnapshot) -> Bool {
+        if let pending = pendingLike, pending.id == snapshot.videoID { return pending.liked }
+        return snapshot.isLiked == true
+    }
+
+    /// Flips the heart immediately and reverts if the request fails; the reply is idempotent.
+    func toggleLike() {
+        guard let snapshot, let id = snapshot.videoID, !id.isEmpty else { return }
+        let target = !isLiked(snapshot)
+        let token = UUID()
+        likeToken = token
+        pendingLike = PendingLike(id: id, liked: target)
+        actionMessage = nil
+        actionTask?.cancel()
+        actionTask = Task {
+            defer { if likeToken == token { pendingLike = nil } }
+            do {
+                try await player.setLiked(target, id: id)
+                await refresh()
+            } catch is CancellationError {
+            } catch { actionMessage = error.localizedDescription }
+        }
+    }
 
     func search(_ query: String) {
         let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -230,9 +265,13 @@ final class PlayerStore: ObservableObject {
                 try await player.play(item, in: list)
                 queueItems = []
                 await refresh()
+                // refresh() clears loadingItemID once mpv reports playback, not when the reply lands.
             } catch is CancellationError {
-            } catch { actionMessage = error.localizedDescription }
-            if loadingItemID == item.id { loadingItemID = nil }
+                if loadingItemID == item.id { loadingItemID = nil }
+            } catch {
+                actionMessage = error.localizedDescription
+                if loadingItemID == item.id { loadingItemID = nil }
+            }
         }
     }
 
@@ -302,7 +341,10 @@ final class PlayerStore: ObservableObject {
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.refresh()
-                try? await Task.sleep(for: .seconds(2))
+                // While yt-dlp resolves a stream nothing is playing, so poll fast enough that the
+                // progress bar and the row spinner react the moment audio starts.
+                let interval = self.snapshot?.isPreparing == true ? 0.4 : 2.0
+                try? await Task.sleep(for: .seconds(interval))
             }
         }
     }

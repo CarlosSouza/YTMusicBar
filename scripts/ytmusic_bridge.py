@@ -623,6 +623,8 @@ def snapshot() -> dict[str, Any]:
         "currentTime": duration if ended else (mpv_get("time-pos") or 0),
         "duration": duration,
         "paused": True if ended else bool(mpv_get("pause")),
+        # core-idle stays true while yt-dlp resolves the stream, so the UI can avoid faking progress.
+        "preparing": bool(mpv_get("core-idle")) and not ended,
         "volume": (100 if volume is None else volume) / 100,
         "muted": bool(mpv_get("mute")),
         "liked": meta.get("liked"),
@@ -654,14 +656,14 @@ def previous_track() -> None:
         mpv_request(["playlist-prev"])
 
 
-def toggle_like(video_id: str) -> None:
+def set_like(video_id: str, liked: bool) -> None:
+    """Sets the like state instead of toggling it, so the optimistic UI cannot drift from the server."""
     if not video_id:
         raise RuntimeError("Nenhuma faixa selecionada para curtir.")
     queue = load_queue()
     meta = queue["tracks"].setdefault(video_id, {})
-    liked = meta.get("liked") is True
-    client().rate_song(video_id, LikeStatus.INDIFFERENT if liked else LikeStatus.LIKE)
-    meta["liked"] = not liked
+    client().rate_song(video_id, LikeStatus.LIKE if liked else LikeStatus.INDIFFERENT)
+    meta["liked"] = liked
     save_queue(queue)
 
 
@@ -737,7 +739,7 @@ def handle(request: dict[str, Any]) -> None:
         action = request.get("action")
         simple = {"next": ["playlist-next"], "toggleMute": ["cycle", "mute"]}
         if action == "like":
-            toggle_like(str(request.get("id") or "") or current_video_id())
+            set_like(str(request.get("id") or "") or current_video_id(), bool(request.get("liked")))
         elif action == "togglePlayback":
             toggle_playback()
         elif action == "previous":

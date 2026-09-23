@@ -33,6 +33,13 @@ enum YTMusicCoreChecks {
             isMuted: false, pageURL: nil, observedAt: observed
         )
         try expect(paused.estimatedTime(at: observed.addingTimeInterval(20)) == 12, "Uma faixa pausada avançou.")
+
+        let preparing = PlaybackSnapshot(
+            title: "Song", artist: "", album: "", artworkURL: nil,
+            currentTime: 0, duration: 200, isPaused: false, volume: 1,
+            isMuted: false, isPreparing: true, pageURL: nil, observedAt: observed
+        )
+        try expect(preparing.estimatedTime(at: observed.addingTimeInterval(30)) == 0, "Uma faixa em preparo avançou o progresso.")
         try expect(DurationFormatting.clock(0) == "0:00", "Formato de zero incorreto.")
         try expect(DurationFormatting.clock(65.9) == "1:05", "Formato em minutos incorreto.")
         try expect(DurationFormatting.clock(3_661) == "1:01:01", "Formato em horas incorreto.")

@@ -90,6 +90,7 @@ final class LocalMusicPlayer: ObservableObject {
             volume: raw.volume ?? 1,
             isMuted: raw.muted ?? false,
             isLiked: raw.liked,
+            isPreparing: raw.preparing ?? false,
             pageURL: raw.url.flatMap(URL.init(string:)),
             queueIndex: raw.queueIndex ?? 0,
             queueCount: raw.queueCount ?? 1
@@ -148,6 +149,10 @@ final class LocalMusicPlayer: ObservableObject {
         _ = try await bridge.request(request)
     }
 
+    func setLiked(_ liked: Bool, id: String) async throws {
+        _ = try await bridge.request(["command": "action", "action": "like", "id": id, "liked": liked])
+    }
+
     func perform(_ action: PlaybackAction, currentID: String? = nil) async throws {
         var request: [String: Any] = ["command": "action"]
         switch action {
@@ -157,7 +162,6 @@ final class LocalMusicPlayer: ObservableObject {
         case .toggleMute: request["action"] = "toggleMute"
         case .seek(let value): request["action"] = "seek"; request["value"] = value
         case .setVolume(let value): request["action"] = "volume"; request["value"] = value
-        case .toggleLike: request["action"] = "like"; request["id"] = currentID ?? ""
         case .jump(let index): request["action"] = "jump"; request["value"] = index
         }
         _ = try await bridge.request(request)
@@ -226,6 +230,7 @@ private struct LocalMusicBridge {
         let volume: Double?
         let muted: Bool?
         let liked: Bool?
+        let preparing: Bool?
         let queueIndex: Int?
         let queueCount: Int?
         let url: String?

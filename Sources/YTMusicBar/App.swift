@@ -493,7 +493,7 @@ private struct LikeButton: View {
     @ObservedObject var store: PlayerStore
 
     var body: some View {
-        let liked = snapshot.isLiked == true
+        let liked = store.isLiked(snapshot)
         IconButton(
             systemName: liked ? "heart.fill" : "heart", font: .title3, size: 32,
             tint: liked ? AppTheme.accent : nil,
@@ -513,12 +513,19 @@ private struct ProgressLine: View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
             let current = drag.value ?? snapshot.estimatedTime(at: context.date)
             HStack(spacing: 8) {
-                Text(DurationFormatting.clock(current)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary).frame(width: 36, alignment: .trailing)
+                Group {
+                    if snapshot.isPreparing {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Text(DurationFormatting.clock(current)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 36, alignment: .trailing)
                 Slider(value: Binding(get: { current }, set: { drag.value = $0 }), in: 0...max(snapshot.duration, 1)) { editing in
                     if !editing, let value = drag.value { store.seek(to: value) }
                 }
                 .controlSize(.small)
-                .disabled(snapshot.duration <= 0)
+                .disabled(snapshot.duration <= 0 || snapshot.isPreparing)
                 Text(DurationFormatting.clock(snapshot.duration)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary).frame(width: 36, alignment: .leading)
             }
         }
