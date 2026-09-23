@@ -127,13 +127,18 @@ final class PlayerStore: ObservableObject {
         player.loadIfNeeded()
         let loadedAt = catalogLoadedAt[catalogTab]
         let stale = loadedAt.map { Date().timeIntervalSince($0) > catalogStaleAfter } ?? true
-        if visibleItems.isEmpty || stale {
-            switch catalogTab {
-            case .queue: loadQueue()
-            case .library: loadLibrary()
-            case .playlists: loadPlaylists()
-            case .results: if hasSearch { search(lastQuery) }
-            }
+        if visibleItems.isEmpty || stale { load(catalogTab) }
+    }
+
+    /// Reloads the visible tab ignoring the staleness window; used after the credentials change.
+    func reloadCatalog() { load(catalogTab) }
+
+    private func load(_ tab: CatalogTab) {
+        switch tab {
+        case .queue: loadQueue()
+        case .library: loadLibrary()
+        case .playlists: loadPlaylists()
+        case .results: if hasSearch { search(lastQuery) }
         }
     }
 

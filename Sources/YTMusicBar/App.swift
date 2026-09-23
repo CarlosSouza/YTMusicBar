@@ -67,6 +67,7 @@ private final class AuthDraft: ObservableObject {
     @Published var isSaving = false
     @Published var message: String?
     @Published var isError = false
+    @Published var succeeded = false
 }
 
 // MARK: - Interaction primitives
@@ -633,17 +634,23 @@ struct AuthSetupView: View {
                 }.padding(4)
             }
             if let message = draft.message {
-                Text(message)
+                Label(message, systemImage: draft.isError ? "exclamationmark.triangle.fill" : (draft.succeeded ? "checkmark.circle.fill" : "info.circle"))
                     .font(.callout)
-                    .foregroundStyle(draft.isError ? .orange : .secondary)
+                    .foregroundStyle(draft.isError ? Color.orange : (draft.succeeded ? Color.green : Color.secondary))
                     .fixedSize(horizontal: false, vertical: true)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
             HStack {
                 Spacer()
-                Button(draft.isSaving ? "Salvando…" : "Salvar e testar") { save() }
-                    .buttonStyle(.borderedProminent).tint(AppTheme.accent)
-                    .disabled(draft.isSaving || draft.headers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if draft.succeeded {
+                    Button("Concluir") { onDone() }
+                        .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Button(draft.isSaving ? "Salvando…" : "Salvar e testar") { save() }
+                        .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                        .disabled(draft.isSaving || draft.headers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -666,17 +673,19 @@ struct AuthSetupView: View {
         draft.isSaving = true
         draft.message = nil
         draft.isError = false
+        draft.succeeded = false
         Task {
             do {
                 let account = try await store.player.configure(rawHeaders: draft.headers)
                 draft.headers = ""
                 draft.message = account.isEmpty ? "Acesso configurado." : "Conectado como \(account)."
+                draft.succeeded = true
                 draft.isSaving = false
-                store.requestRefresh()
-                onDone()
+                store.reloadCatalog()
             } catch {
                 draft.message = error.localizedDescription
                 draft.isError = true
+                draft.succeeded = false
                 draft.isSaving = false
             }
         }
