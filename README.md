@@ -2,11 +2,11 @@
 
 A standalone YouTube Music client for the macOS 14+ menu bar, built with SwiftUI, `ytmusicapi`, `yt-dlp` and `mpv`. The architecture follows the Omarchy `omarchy-ytmusic` widget (Quickshell UI plus local mpv playback) and reuses the local packaging approach of [UsageBar](https://github.com/CarlosSouza/UsageBar).
 
-The catalog is queried through `ytmusicapi`'s local protocol. Playback uses a single persistent `mpv` that resolves the audio itself through `ytdl_hook` (pointed at the Homebrew `yt-dlp`) and keeps the track queue. There is no Safari, Chrome, WebView, Apple Events or embedded login.
+The catalog is queried through `ytmusicapi`'s local protocol. Playback uses a single persistent `mpv` that resolves the audio itself through `ytdl_hook` (pointed at the Homebrew `yt-dlp`) and keeps the track queue. There is no Safari, Chrome or Apple Events, and playback never goes through a web view: a `WKWebView` is used only to sign in, so WebKit owns the session cookies instead of the app holding a copy.
 
 ## Features
 
-- Everything lives in the menu bar popover, with no windows: player with artwork, draggable progress, transport and volume; search; Queue, Library, Playlists, Para você and Results tabs in a scrollable list; Settings and Connect as internal pages.
+- Everything lives in the menu bar popover, the sign-in window being the only exception: player with artwork, draggable progress, transport and volume; search; Queue, Library, Playlists, Para você and Results tabs in a scrollable list; Settings and Connect as internal pages.
 - The `Para você` tab mirrors the YouTube Music home rows (Tocar de novo, Meu mix, Quick picks, Recaps...), so the playlists and mixes the service generates for the account show up next to the ones saved in the library.
 - A radio button rebuilds the queue from the track playing now, using the endless radio YouTube Music builds from that song.
 - Local background playback by a single mpv, reused across clicks.
@@ -37,11 +37,12 @@ The script produces an ad hoc signed app for local use. Public distribution stil
 ## First run
 
 1. Open YTMusicBar from the menu bar.
-2. Click **Configure access…**. The page explains each step and opens YouTube Music. Copy the request headers of a `/browse` call from the browser network panel and press **Importar da área de transferência**, or paste them into the box by hand. The headers block, a `Copy as cURL` command and the bare `cookie` value are all accepted. No Terminal needed.
-3. The credentials are written to disk only after the app confirms the session is signed in, so a stale copy is rejected instead of silently saved. On success the account name appears in Settings, where **Reconfigurar…** and the expiry warning live.
-4. After saving, use search or the Library tab and click a song; the controls appear in the popover and the title in the menu bar.
+2. Click **Configure access…** and press **Entrar com o Google**. The login happens in a window owned by the app, using a Safari user agent, because WebKit's own agent has no `Safari` token and Google refuses to sign in with it. The cookies stay in WebKit's cookie store, so nothing has to be copied by hand.
+3. A manual import remains available: copy the request headers of a `/browse` call from any browser network panel (or a `Copy as cURL` command, or the bare `cookie` value) and press **Importar da área de transferência**.
+4. The credentials are written to disk only after the app confirms the session is signed in, so a stale copy is rejected instead of silently saved. On success the account name appears in Settings, where **Reconfigurar…** and the expiry warning live.
+5. After saving, use search or the Library tab and click a song; the controls appear in the popover and the title in the menu bar.
 
-The headers are stored in `~/Library/Application Support/YTMusicBar/ytmusic-auth.json` and used only by the local bridge. Only the cookie and the account index are kept; the `SAPISIDHASH` is regenerated on every request. The browser is not needed after setup. They are sensitive credentials and must not be shared.
+The headers are stored in `~/Library/Application Support/YTMusicBar/ytmusic-auth.json` and used only by the local bridge. Only the cookie and the account index are kept; the `SAPISIDHASH` is regenerated on every request. They are sensitive credentials and must not be shared.
 
 ## Library, playlists and search
 

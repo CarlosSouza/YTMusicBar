@@ -659,20 +659,28 @@ struct AuthSetupView: View {
     @ObservedObject var store: PlayerStore
     let onDone: () -> Void
     @StateObject private var draft = AuthDraft()
+    @ObservedObject private var signIn = GoogleSignIn.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             PanelHeader(title: "Conectar", onBack: onDone, trailing: AnyView(Color.clear.frame(width: 60, height: 1)))
-            Text("O navegador é usado apenas para autorizar o acesso. Depois disso, o app toca as músicas com mpv e não mantém o site aberto.")
+            Text("O login acontece dentro do app. Depois disso, o app toca as músicas com mpv e não mantém o site aberto.")
                 .font(.caption).foregroundStyle(.secondary)
-            GroupBox("1. Abra o YouTube Music") {
-                HStack {
-                    Text("Entre na sua conta no navegador padrão.").font(.caption)
-                    Spacer()
-                    Button("Abrir YouTube Music") { store.player.openYouTubeMusic() }.buttonStyle(PressScaleStyle(scale: 0.96))
+            GroupBox("1. Entre com a conta Google") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Abre uma janela com a página de login. Os cookies ficam guardados pelo próprio WebKit, então não precisam ser copiados à mão.")
+                        .font(.caption)
+                    HStack {
+                        Button(signIn.isPresenting ? "Janela de login aberta…" : "Entrar com o Google") {
+                            signIn.present { header in saveFromSignIn(header) }
+                        }
+                        .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                        .disabled(draft.isSaving || signIn.isPresenting)
+                        Spacer()
+                    }
                 }.padding(4)
             }
-            GroupBox("2. Copie os headers de acesso") {
+            GroupBox("2. Ou importe os headers manualmente") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("No YouTube Music: pressione ⌘⌥I → Network → clique em Biblioteca → abra a requisição /browse → botão direito → Copy → Copy request headers.")
                         .font(.caption)
@@ -714,6 +722,11 @@ struct AuthSetupView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.snappy(duration: 0.25), value: draft.message == nil)
+    }
+
+    private func saveFromSignIn(_ header: String) {
+        draft.headers = "cookie: \(header)"
+        save()
     }
 
     private func importFromClipboard() {
