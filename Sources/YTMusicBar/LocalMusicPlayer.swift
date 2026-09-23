@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import YTMusicCore
 
@@ -231,55 +232,114 @@ private struct LocalMusicBridge {
     }
 
     func request(_ request: [String: Any]) async throws -> Reply {
-        try await Task.detached(priority: .userInitiated) {
-            // Bundled by build-app.sh; when running from `swift run`, fall back to the repo's scripts folder.
-            let bundled = Bundle.main.resourceURL?.appendingPathComponent("ytmusic_bridge.py")
-            let script = bundled.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0.path : nil }
-                ?? ProcessInfo.processInfo.environment["YTMUSICBAR_BRIDGE"]
-                ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                    .appendingPathComponent("scripts/ytmusic_bridge.py").path
-            let bundledPythonPath = Bundle.main.resourceURL?.appendingPathComponent(".ytmusic-venv/bin/python").path
-            let bundledPython = bundledPythonPath.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
-            let python = ProcessInfo.processInfo.environment["YTMUSICBAR_PYTHON"] ?? bundledPython ?? "/opt/homebrew/bin/python3"
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: python)
-            process.arguments = [script]
-            var environment = ProcessInfo.processInfo.environment
-            if let bundledPackages = Bundle.main.resourceURL?.appendingPathComponent("ytmusic-site-packages").path {
-                environment["PYTHONPATH"] = bundledPackages + (environment["PYTHONPATH"].map { ":\($0)" } ?? "")
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do { continuation.resume(returning: try Self.perform(request)) }
+                catch { continuation.resume(throwing: error) }
             }
-            process.environment = environment
-            let input = Pipe()
-            let output = Pipe()
-            process.standardInput = input
-            process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
-            try process.run()
-            let data = try JSONSerialization.data(withJSONObject: request)
-            input.fileHandleForWriting.write(data)
-            input.fileHandleForWriting.write(Data("\n".utf8))
-            try input.fileHandleForWriting.close()
-            // Read before waiting. A reply larger than the pipe buffer (~64KB, and a radio queue is
-            // about 72KB) blocks the child on write while we block on exit, and neither ever moves.
-            let outputData = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard let line = String(data: outputData, encoding: .utf8)?.split(separator: "\n").first,
-                  let json = line.data(using: .utf8) else { throw LocalMusicError.noReply }
-            let reply = try JSONDecoder().decode(Reply.self, from: json)
-            guard reply.ok else { throw LocalMusicError.failed(reply.error ?? "O backend local recusou o comando.") }
-            return reply
-        }.value
+        }
+    }
+
+    /// Runs the bridge on a GCD thread, never on the cooperative pool: the watchdog has to block.
+    private static func perform(_ request: [String: Any]) throws -> Reply {
+        // Bundled by build-app.sh; when running from `swift run`, fall back to the repo's scripts folder.
+        let bundled = Bundle.main.resourceURL?.appendingPathComponent("ytmusic_bridge.py")
+        let script = bundled.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0.path : nil }
+            ?? ProcessInfo.processInfo.environment["YTMUSICBAR_BRIDGE"]
+            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("scripts/ytmusic_bridge.py").path
+        let bundledPythonPath = Bundle.main.resourceURL?.appendingPathComponent(".ytmusic-venv/bin/python").path
+        let bundledPython = bundledPythonPath.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
+        let python = ProcessInfo.processInfo.environment["YTMUSICBAR_PYTHON"] ?? bundledPython ?? "/opt/homebrew/bin/python3"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: python)
+        process.arguments = [script]
+        var environment = ProcessInfo.processInfo.environment
+        if let bundledPackages = Bundle.main.resourceURL?.appendingPathComponent("ytmusic-site-packages").path {
+            environment["PYTHONPATH"] = bundledPackages + (environment["PYTHONPATH"].map { ":\($0)" } ?? "")
+        }
+        process.environment = environment
+        let input = Pipe()
+        let output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = try JSONSerialization.data(withJSONObject: request)
+        input.fileHandleForWriting.write(data)
+        input.fileHandleForWriting.write(Data("\n".utf8))
+        try input.fileHandleForWriting.close()
+        // Read before waiting. A reply larger than the pipe buffer (~64KB, and a radio queue is
+        // about 72KB) blocks the child on write while we block on exit, and neither ever moves.
+        // The read runs on its own thread so the watchdog can still fire on a hung network call,
+        // which the bridge cannot time out on its own.
+        let capture = PipeCapture()
+        let read = DispatchGroup()
+        read.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            capture.store(output.fileHandleForReading.readDataToEndOfFile())
+            read.leave()
+        }
+        guard read.wait(timeout: .now() + timeout) == .success else {
+            terminate(process)
+            throw LocalMusicError.timedOut(Int(timeout))
+        }
+        process.waitUntilExit()
+        guard let line = String(data: capture.data, encoding: .utf8)?.split(separator: "\n").first,
+              let json = line.data(using: .utf8) else { throw LocalMusicError.noReply }
+        let reply = try JSONDecoder().decode(Reply.self, from: json)
+        guard reply.ok else { throw LocalMusicError.failed(reply.error ?? "O backend local recusou o comando.") }
+        return reply
+    }
+
+    /// Longest we wait for one bridge command. The slowest measured is a playlist load at about 2.5s,
+    /// so this only fires on a request that is genuinely stuck.
+    private static let timeout: TimeInterval = 20
+
+    private static func terminate(_ process: Process) {
+        guard process.isRunning else { return }
+        process.terminate()
+        if !waitForExit(process, seconds: 1) {
+            kill(process.processIdentifier, SIGKILL)
+            _ = waitForExit(process, seconds: 1)
+        }
+    }
+
+    private static func waitForExit(_ process: Process, seconds: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while process.isRunning, Date() < deadline { usleep(20_000) }
+        return !process.isRunning
+    }
+}
+
+/// Thread-safe box for the pipe read, which finishes on a different thread than the one that reads it.
+private final class PipeCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = Data()
+
+    func store(_ data: Data) {
+        lock.lock()
+        value = data
+        lock.unlock()
+    }
+
+    var data: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }
 
 private enum LocalMusicError: LocalizedError {
     case noReply
     case failed(String)
+    case timedOut(Int)
 
     var errorDescription: String? {
         switch self {
         case .noReply: "O backend local não retornou uma resposta."
         case .failed(let message): message
+        case .timedOut(let seconds): "O backend local não respondeu em \(seconds) segundos."
         }
     }
 }
