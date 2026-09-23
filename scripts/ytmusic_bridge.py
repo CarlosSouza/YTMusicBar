@@ -26,7 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 from urllib.parse import parse_qs, urlparse
 
 try:
@@ -209,8 +209,29 @@ def selftest() -> int:
         if got != expected:
             print(f"BridgeSelfTest: FAIL · album {raw_album!r} virou {got!r}, esperado {expected!r}")
             return 1
+    if not queue_race_check():
+        return 1
     print("BridgeSelfTest: OK")
     return 0
+
+
+def queue_race_check() -> bool:
+    """A snapshot must not resurrect a queue that a concurrent play() already replaced."""
+    global QUEUE_FILE
+    original = QUEUE_FILE
+    try:
+        QUEUE_FILE = pathlib.Path(tempfile.mkdtemp()) / "queue.json"
+        save_queue({"order": ["a"], "tracks": {"a": {"title": "A"}}})
+        load_queue()  # what a snapshot process would have read before play() ran
+        save_queue({"order": ["a", "b"], "tracks": {"a": {"title": "A"}, "b": {"title": "B"}}})
+        update_queue(lambda queue: queue.update({"lastVideoId": "a"}))
+        after = load_queue()
+        if after.get("order") != ["a", "b"] or "b" not in (after.get("tracks") or {}):
+            print(f"BridgeSelfTest: FAIL · update_queue atropelou a fila: {after.get('order')}")
+            return False
+        return True
+    finally:
+        QUEUE_FILE = original
 
 
 # --------------------------------------------------------------------------- catalog
@@ -487,21 +508,42 @@ def save_queue(queue: dict[str, Any]) -> None:
     QUEUE_FILE.write_text(json.dumps(queue, ensure_ascii=False), encoding="utf-8")
 
 
-def ensure_like_known(queue: dict[str, Any], video_id: str) -> None:
+def update_queue(mutate: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    """Read-modify-write of the queue under the player lock, re-reading first.
+
+    Each bridge call is its own process, so a snapshot that read the file, then wrote it back
+    after a play() had replaced the queue, would resurrect the old one and lose the metadata
+    of every track that play() had just queued.
+    """
+    with player_lock():
+        queue = load_queue()
+        mutate(queue)
+        save_queue(queue)
+        return queue
+
+
+def ensure_like_known(queue: dict[str, Any], video_id: str) -> dict[str, Any] | None:
     """Fetch the like state from the server once per track, lazily, so play stays fast."""
     meta = queue["tracks"].get(video_id)
     if not meta or meta.get("liked") is not None or meta.get("likeChecked"):
-        return
-    meta["likeChecked"] = True
+        return None
+    liked: bool | None = None
     try:
         data = client().get_watch_playlist(videoId=video_id, limit=1)
         for row in data.get("tracks") or []:
             if row.get("videoId") == video_id:
-                meta["liked"] = like_status(row)
+                liked = like_status(row)
                 break
     except Exception:
-        pass
-    save_queue(queue)
+        return None
+
+    def mutate(queue: dict[str, Any]) -> None:
+        entry = queue["tracks"].get(video_id)
+        if entry is not None:
+            entry["likeChecked"] = True
+            entry["liked"] = liked
+
+    return update_queue(mutate)["tracks"].get(video_id)
 
 
 def video_id_from(url: str) -> str:
@@ -604,11 +646,10 @@ def snapshot() -> dict[str, Any]:
     if ended and not meta:
         return {"idle": True}
     if video_id and video_id != queue.get("lastVideoId"):
-        queue["lastVideoId"] = video_id
-        save_queue(queue)
-    if video_id:
-        ensure_like_known(queue, video_id)
+        queue = update_queue(lambda q: q.update({"lastVideoId": video_id}))
         meta = queue["tracks"].get(video_id, meta)
+    if video_id:
+        meta = ensure_like_known(queue, video_id) or meta
     title = meta.get("title") or mpv_get("media-title") or "Carregando…"
     if index < 0 and video_id in order:
         index = order.index(video_id)
@@ -660,11 +701,12 @@ def set_like(video_id: str, liked: bool) -> None:
     """Sets the like state instead of toggling it, so the optimistic UI cannot drift from the server."""
     if not video_id:
         raise RuntimeError("Nenhuma faixa selecionada para curtir.")
-    queue = load_queue()
-    meta = queue["tracks"].setdefault(video_id, {})
     client().rate_song(video_id, LikeStatus.LIKE if liked else LikeStatus.INDIFFERENT)
-    meta["liked"] = liked
-    save_queue(queue)
+
+    def mutate(queue: dict[str, Any]) -> None:
+        queue["tracks"].setdefault(video_id, {})["liked"] = liked
+
+    update_queue(mutate)
 
 
 # --------------------------------------------------------------------------- protocol

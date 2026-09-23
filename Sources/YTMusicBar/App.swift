@@ -470,7 +470,9 @@ private struct CompactNowPlaying: View {
                 .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
             VStack(alignment: .leading, spacing: 3) {
                 Text(snapshot.title).font(.headline).lineLimit(2)
-                Text(snapshot.artist.isEmpty ? "YouTube Music" : snapshot.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                if !snapshot.artist.isEmpty {
+                    Text(snapshot.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
                 if snapshot.queueCount > 1 {
                     Text("Faixa \(snapshot.queueIndex + 1) de \(snapshot.queueCount)").font(.caption2).foregroundStyle(.tertiary)
                         .contentTransition(.numericText())
