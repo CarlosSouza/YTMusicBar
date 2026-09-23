@@ -748,6 +748,13 @@ def previous_track() -> None:
         mpv_request(["playlist-prev"])
 
 
+def set_in_library(item_id: str, saved: bool) -> None:
+    """Adds or removes a playlist or album from the library."""
+    if not item_id:
+        raise RuntimeError("Nenhum item selecionado.")
+    client().rate_playlist(item_id, LikeStatus.LIKE if saved else LikeStatus.INDIFFERENT)
+
+
 def set_like(video_id: str, liked: bool) -> None:
     """Sets the like state instead of toggling it, so the optimistic UI cannot drift from the server."""
     if not video_id:
@@ -836,6 +843,8 @@ def handle(request: dict[str, Any]) -> None:
         simple = {"next": ["playlist-next"], "toggleMute": ["cycle", "mute"]}
         if action == "like":
             set_like(str(request.get("id") or "") or current_video_id(), bool(request.get("liked")))
+        elif action == "library":
+            set_in_library(str(request.get("id") or ""), bool(request.get("saved")))
         elif action == "togglePlayback":
             toggle_playback()
         elif action == "previous":

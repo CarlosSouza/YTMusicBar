@@ -46,6 +46,8 @@ final class PlayerStore: ObservableObject {
     @Published private(set) var loadingItemID: String?
     /// Like state shown while the server round trip is in flight.
     @Published private(set) var pendingLike: PendingLike?
+    /// True while the app is reloading YouTube Music in a web view to refresh the session cookies.
+    @Published private(set) var isRenewingSession = false
     @Published private(set) var lastQuery = ""
     @Published private(set) var panelPage: PanelPage = .player
     /// True when the last navigation went deeper (player → settings → auth); drives the slide direction.
@@ -383,7 +385,38 @@ final class PlayerStore: ObservableObject {
     /// An empty library, playlist list or home is what a dropped session looks like, so ask the bridge.
     private func checkAccess(isEmpty: Bool) async {
         guard [.library, .playlists, .forYou].contains(catalogTab) else { return }
-        if isEmpty { await player.verifyAccess() } else { player.clearAccessWarning() }
+        if isEmpty { await verifyAccess() } else { player.clearAccessWarning() }
+    }
+
+    /// Checks the session and, when the stored copy went stale, tries to renew it from WebKit.
+    /// Signing in lives in a web view the app owns, so the page can usually rotate the cookies
+    /// itself and the app reconnects without asking anything.
+    func verifyAccess() async {
+        await player.verifyAccess()
+        guard player.accessWarning != nil else { return }
+        isRenewingSession = true
+        defer { isRenewingSession = false }
+        guard let header = await GoogleSignIn.shared.refreshedCookieHeader(),
+              (try? await player.configure(rawHeaders: "cookie: \(header)")) != nil else { return }
+        player.clearAccessWarning()
+        reloadCatalog()
+    }
+
+    /// Adds or removes a playlist or album from the library, then refreshes the library list.
+    func setInLibrary(_ item: MediaItem, saved: Bool) {
+        guard !item.remoteID.isEmpty else { return }
+        actionMessage = nil
+        actionTask?.cancel()
+        actionTask = Task {
+            do {
+                try await player.setInLibrary(id: item.remoteID, saved: saved)
+                showAction(saved ? "Adicionado à biblioteca." : "Removido da biblioteca.")
+                // The server takes a moment to reflect the change in the library list.
+                try? await Task.sleep(for: .seconds(2))
+                loadPlaylists()
+            } catch is CancellationError {
+            } catch { showAction(error.localizedDescription) }
+        }
     }
 
     private func startPolling() {

@@ -15,6 +15,7 @@ The catalog is queried through `ytmusicapi`'s local protocol. Playback uses a si
 - Track name in the menu bar, with artwork, artist, album and progress in the popover.
 - Play/pause, previous (restarts the track after 3 s), next, drag to seek.
 - Like or unlike the current track, applied to the heart immediately and reconciled with the server in the background.
+- Save a playlist or album to the library from its context menu, and remove it from the Playlists tab, where everything already is the library.
 - mpv volume and mute.
 - No Apple Events and no macOS Automation permission.
 
@@ -80,7 +81,8 @@ The checks cover URLs, progress estimation, duration formatting, queue ids and t
 - `ytmusicapi` and `yt-dlp` depend on YouTube's internal APIs and protocols and may need updates.
 - Opening a playlist or a personalized mix queues about 400 tracks at first, because the personalized mixes are effectively endless and asking for all of them never returns. A radio or a mix then tops itself up as it plays, five tracks before the end, up to 2000 tracks; a finite playlist simply stops growing once it is exhausted.
 - Starting a track is not instant: mpv resolves the stream with `yt-dlp` first, which takes a second or two. The progress bar shows a spinner during that window instead of counting from zero, and the row keeps its spinner until audio actually starts.
-- Authentication cookies expire. Signing in now happens in a `WKWebView` the app owns, so the session is in WebKit's cookie store rather than a copy taken from another browser, but the app does not yet re-read that store when its stored copy goes stale.
+- Authentication cookies expire. Signing in happens in a `WKWebView` the app owns, so the session lives in WebKit's cookie store. When the stored copy goes stale the app reloads YouTube Music in an offscreen web view, lets the page rotate `__Secure-3PSIDTS` itself, and reconnects on its own; only if WebKit has no session either does it ask for a new sign-in.
+- The library list is eventually consistent server side: after saving or removing a playlist it takes a moment to show up, so the app waits two seconds before reloading it.
 - The app does not bypass ads, DRM, geographic restrictions or YouTube Premium requirements.
 - The local build is ad hoc signed and not ready for distribution outside this machine.
 

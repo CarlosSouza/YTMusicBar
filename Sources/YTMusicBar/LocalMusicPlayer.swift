@@ -119,6 +119,11 @@ final class LocalMusicPlayer: ObservableObject {
         try await bridge.request(["command": "extend"]).added
     }
 
+    /// Adds or removes a playlist or album from the library.
+    func setInLibrary(id: String, saved: Bool) async throws {
+        _ = try await bridge.request(["command": "action", "action": "library", "id": id, "saved": saved])
+    }
+
     private static func mediaItem(_ raw: LocalMusicBridge.RawItem) -> MediaItem {
         MediaItem(
             title: raw.title,

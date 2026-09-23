@@ -307,7 +307,10 @@ private struct CatalogList: View {
             } else if items.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: emptyIcon).font(.title2).foregroundStyle(.tertiary)
-                    if store.player.accessWarning != nil {
+                    if store.isRenewingSession {
+                        Text("Renovando a sessão…").font(.callout).foregroundStyle(.secondary)
+                        Text("O app recarregou o YouTube Music para renovar os cookies.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    } else if store.player.accessWarning != nil {
                         Text("A sessão do YouTube Music expirou.").font(.callout).foregroundStyle(.orange)
                         Text("Reconecte para carregar a biblioteca.").font(.caption).foregroundStyle(.secondary)
                         Button("Reconectar") { store.go(to: .auth) }
@@ -369,8 +372,18 @@ private struct CatalogList: View {
             play: {
                 if store.catalogTab == .queue { store.jump(to: index) } else { store.play(item, in: list) }
             },
-            radio: { store.startRadio(from: item) }
+            radio: { store.startRadio(from: item) },
+            library: libraryAction(for: item)
         )
+    }
+
+    /// Only collections can be saved. The Playlists tab *is* the library, so there the action removes.
+    private func libraryAction(for item: MediaItem) -> RowLibraryAction? {
+        guard item.kind == .playlist || item.kind == .album, !item.remoteID.isEmpty else { return nil }
+        if store.catalogTab == .playlists {
+            return RowLibraryAction(title: "Remover da biblioteca") { store.setInLibrary(item, saved: false) }
+        }
+        return RowLibraryAction(title: "Adicionar à biblioteca") { store.setInLibrary(item, saved: true) }
     }
 
     /// Keeps the playing track in view on the queue tab.
@@ -380,6 +393,7 @@ private struct CatalogList: View {
     }
 
     private var emptyIcon: String {
+        if store.isRenewingSession { return "arrow.triangle.2.circlepath" }
         if store.player.accessWarning != nil { return "exclamationmark.triangle" }
         return store.catalogTab == .results ? "magnifyingglass" : "music.note.list"
     }
@@ -393,6 +407,12 @@ private struct CatalogList: View {
         case .results: "Nenhuma música encontrada para “\(store.lastQuery)”."
         }
     }
+}
+
+/// The library action a row offers in its context menu, when the row can be saved or removed.
+private struct RowLibraryAction {
+    let title: String
+    let run: () -> Void
 }
 
 /// Placeholder rows shown while a catalog page loads, drawn like the rows that will replace them so
@@ -533,11 +553,17 @@ private struct CatalogRow: View {
     let isLoading: Bool
     let play: () -> Void
     let radio: () -> Void
+    let library: RowLibraryAction?
     @StateObject private var hover = HoverState()
 
     var body: some View {
         if item.kind == .song, !item.remoteID.isEmpty {
-            content.contextMenu { Button("Iniciar rádio a partir desta música") { radio() } }
+            content.contextMenu {
+                Button("Iniciar rádio a partir desta música") { radio() }
+                if let library { Button(library.title) { library.run() } }
+            }
+        } else if let library {
+            content.contextMenu { Button(library.title) { library.run() } }
         } else {
             content
         }
@@ -791,7 +817,7 @@ private struct SettingsPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task { await store.player.verifyAccess() }
+        .task { await store.verifyAccess() }
     }
 
     private var accountStatus: String {
