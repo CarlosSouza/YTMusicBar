@@ -291,8 +291,15 @@ private struct CatalogList: View {
                 ProgressView("Carregando…").frame(maxWidth: .infinity, maxHeight: .infinity).transition(.opacity)
             } else if items.isEmpty {
                 VStack(spacing: 6) {
-                    Image(systemName: store.catalogTab == .results ? "magnifyingglass" : "music.note.list").font(.title2).foregroundStyle(.tertiary)
-                    Text(store.catalogMessage ?? emptyHint).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Image(systemName: emptyIcon).font(.title2).foregroundStyle(.tertiary)
+                    if store.player.accessWarning != nil {
+                        Text("A sessão do YouTube Music expirou.").font(.callout).foregroundStyle(.orange)
+                        Text("Reconecte para carregar a biblioteca.").font(.caption).foregroundStyle(.secondary)
+                        Button("Reconectar") { store.go(to: .auth) }
+                            .buttonStyle(.borderedProminent).tint(AppTheme.accent).padding(.top, 2)
+                    } else {
+                        Text(store.catalogMessage ?? emptyHint).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.opacity)
@@ -300,17 +307,19 @@ private struct CatalogList: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 2) {
-                            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                                CatalogRow(
-                                    item: item,
-                                    isCurrent: store.isCurrent(at: index, item),
-                                    isPlayed: store.isPlayed(at: index),
-                                    isPlaying: store.snapshot?.isPaused == false,
-                                    isLoading: store.loadingItemID == item.id
-                                ) {
-                                    if store.catalogTab == .queue { store.jump(to: index) } else { store.play(item, in: items) }
+                            if store.catalogTab == .forYou {
+                                ForEach(store.homeSections) { section in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        SectionHeader(title: section.title)
+                                        ForEach(Array(section.items.enumerated()), id: \.offset) { index, item in
+                                            row(item, in: section.items, index: index)
+                                        }
+                                    }
                                 }
-                                .id(index)
+                            } else {
+                                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                                    row(item, in: items, index: index).id(index)
+                                }
                             }
                         }
                         .padding(.vertical, 2)
@@ -327,10 +336,27 @@ private struct CatalogList: View {
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
     }
 
+    private func row(_ item: MediaItem, in list: [MediaItem], index: Int) -> some View {
+        CatalogRow(
+            item: item,
+            isCurrent: store.isCurrent(at: index, item),
+            isPlayed: store.isPlayed(at: index),
+            isPlaying: store.snapshot?.isPaused == false,
+            isLoading: store.loadingItemID == item.id
+        ) {
+            if store.catalogTab == .queue { store.jump(to: index) } else { store.play(item, in: list) }
+        }
+    }
+
     /// Keeps the playing track in view on the queue tab.
     private func scrollToCurrent(_ proxy: ScrollViewProxy, animated: Bool) {
         guard store.catalogTab == .queue, let index = store.snapshot?.queueIndex else { return }
         if animated { withAnimation(AppTheme.swap) { proxy.scrollTo(index, anchor: .center) } } else { proxy.scrollTo(index, anchor: .center) }
+    }
+
+    private var emptyIcon: String {
+        if store.player.accessWarning != nil { return "exclamationmark.triangle" }
+        return store.catalogTab == .results ? "magnifyingglass" : "music.note.list"
     }
 
     private var emptyHint: String {
@@ -338,8 +364,23 @@ private struct CatalogList: View {
         case .queue: "Nada na fila."
         case .library: "Nenhuma música na biblioteca."
         case .playlists: "Nenhuma playlist na biblioteca."
+        case .forYou: "Nada para você agora."
         case .results: "Nenhuma música encontrada para “\(store.lastQuery)”."
         }
+    }
+}
+
+private struct SectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            .padding(.bottom, 2)
     }
 }
 
@@ -502,6 +543,13 @@ private struct Transport: View {
             .animation(AppTheme.hover, value: playHover.isHovering)
             .help(snapshot?.isPaused == false ? "Pausar" : "Reproduzir")
             IconButton(systemName: "forward.fill", size: 32, isDisabled: snapshot?.hasNext != true, help: "Próxima", action: store.next)
+            IconButton(
+                systemName: "dot.radiowaves.left.and.right",
+                size: 32,
+                isDisabled: snapshot == nil,
+                help: "Rádio a partir desta faixa",
+                action: store.startRadio
+            )
         }
     }
 }

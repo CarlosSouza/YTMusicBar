@@ -6,7 +6,7 @@ import YTMusicCore
 
 /// Catalog tabs shown inside the popover. "Results" only exists while there is a search query.
 enum CatalogTab: String, CaseIterable, Identifiable {
-    case queue, library, playlists, results
+    case queue, library, playlists, forYou, results
 
     var id: String { rawValue }
 
@@ -15,6 +15,7 @@ enum CatalogTab: String, CaseIterable, Identifiable {
         case .queue: "Fila"
         case .library: "Biblioteca"
         case .playlists: "Playlists"
+        case .forYou: "Para você"
         case .results: "Resultados"
         }
     }
@@ -32,6 +33,7 @@ final class PlayerStore: ObservableObject {
     @Published private(set) var searchResults: [MediaItem] = []
     @Published private(set) var librarySongs: [MediaItem] = []
     @Published private(set) var playlists: [MediaItem] = []
+    @Published private(set) var homeSections: [HomeSection] = []
     @Published private(set) var queueItems: [MediaItem] = []
     @Published private(set) var isCatalogLoading = false
     @Published private(set) var catalogMessage: String?
@@ -84,7 +86,7 @@ final class PlayerStore: ObservableObject {
 
     /// Tabs currently available: the queue needs something loaded, results need a search.
     var availableTabs: [CatalogTab] {
-        var tabs: [CatalogTab] = [.library, .playlists]
+        var tabs: [CatalogTab] = [.library, .playlists, .forYou]
         if snapshot != nil { tabs.insert(.queue, at: 0) }
         if hasSearch { tabs.append(.results) }
         return tabs
@@ -95,6 +97,7 @@ final class PlayerStore: ObservableObject {
         case .queue: queueItems
         case .library: librarySongs
         case .playlists: playlists
+        case .forYou: homeSections.flatMap(\.items)
         case .results: searchResults
         }
     }
@@ -138,6 +141,7 @@ final class PlayerStore: ObservableObject {
         case .queue: loadQueue()
         case .library: loadLibrary()
         case .playlists: loadPlaylists()
+        case .forYou: loadForYou()
         case .results: if hasSearch { search(lastQuery) }
         }
     }
@@ -187,6 +191,30 @@ final class PlayerStore: ObservableObject {
     func loadLibrary() { loadCatalog({ try await self.player.library() }) { self.librarySongs = $0.items; self.catalogLoadedAt[.library] = Date() } }
     func loadPlaylists() { loadCatalog({ try await self.player.playlists() }) { self.playlists = $0.items; self.catalogLoadedAt[.playlists] = Date() } }
 
+    func loadForYou() {
+        loadSections({ try await self.player.home() }) { sections in
+            self.homeSections = sections
+            self.catalogLoadedAt[.forYou] = Date()
+        }
+    }
+
+    /// Replaces the queue with the radio built from the track playing now.
+    func startRadio() {
+        guard let id = snapshot?.videoID, !id.isEmpty else { return }
+        actionMessage = nil
+        loadingItemID = id
+        actionTask?.cancel()
+        actionTask = Task {
+            do {
+                try await player.playRadio(id: id)
+                queueItems = []
+                await refresh()
+            } catch is CancellationError {
+            } catch { actionMessage = error.localizedDescription }
+            if loadingItemID == id { loadingItemID = nil }
+        }
+    }
+
     /// Starts a playlist, or a song together with the list it was clicked in.
     /// Rapid clicks are serialized by the bridge; the last one wins.
     func play(_ item: MediaItem, in list: [MediaItem] = []) {
@@ -224,6 +252,7 @@ final class PlayerStore: ObservableObject {
         case .queue where queueItems.isEmpty: loadQueue()
         case .library where librarySongs.isEmpty: loadLibrary()
         case .playlists where playlists.isEmpty: loadPlaylists()
+        case .forYou where homeSections.isEmpty: loadForYou()
         default: break
         }
     }
@@ -232,10 +261,35 @@ final class PlayerStore: ObservableObject {
         isCatalogLoading = true
         catalogMessage = nil
         Task {
-            do { let page = try await request(); assign(page); catalogMessage = page.items.isEmpty ? "Nenhum item encontrado." : nil }
-            catch { catalogMessage = error.localizedDescription }
+            do {
+                let page = try await request()
+                assign(page)
+                catalogMessage = page.items.isEmpty ? "Nenhum item encontrado." : nil
+                await checkAccess(isEmpty: page.items.isEmpty)
+            } catch { catalogMessage = error.localizedDescription }
             isCatalogLoading = false
         }
+    }
+
+    /// The "Para você" tab is a list of titled rows, so it cannot reuse `loadCatalog`.
+    private func loadSections(_ request: @escaping () async throws -> [HomeSection], _ assign: @escaping ([HomeSection]) -> Void) {
+        isCatalogLoading = true
+        catalogMessage = nil
+        Task {
+            do {
+                let sections = try await request()
+                assign(sections)
+                catalogMessage = sections.isEmpty ? "Nenhum item encontrado." : nil
+                await checkAccess(isEmpty: sections.isEmpty)
+            } catch { catalogMessage = error.localizedDescription }
+            isCatalogLoading = false
+        }
+    }
+
+    /// An empty library, playlist list or home is what a dropped session looks like, so ask the bridge.
+    private func checkAccess(isEmpty: Bool) async {
+        guard [.library, .playlists, .forYou].contains(catalogTab) else { return }
+        if isEmpty { await player.verifyAccess() } else { player.clearAccessWarning() }
     }
 
     private func startPolling() {

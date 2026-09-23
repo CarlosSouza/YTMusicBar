@@ -55,6 +55,9 @@ AUDIO_OUTPUT = os.environ.get("YTMUSICBAR_AUDIO_OUTPUT", "")  # "null" keeps aut
 WATCH_URL = "https://www.youtube.com/watch?v={}"
 MUSIC_WATCH_URL = "https://music.youtube.com/watch?v={}"
 MUSIC_PLAYLIST_URL = "https://music.youtube.com/playlist?list={}"
+# The radio endpoint treats the limit as a floor and usually returns more.
+RADIO_LIMIT = 150
+HOME_ROWS = 20
 
 
 def reply(ok: bool, **payload: Any) -> None:
@@ -195,6 +198,17 @@ def selftest() -> int:
             continue
         print(f"BridgeSelfTest: FAIL · aceitou entrada inválida {raw!r}")
         return 1
+    durations = [({"duration_seconds": 279}, 279), ({"length": "4:39"}, 279), ({"length": "1:01:01"}, 3661), ({}, 0), ({"length": ""}, 0)]
+    for item, expected in durations:
+        if duration_of(item) != expected:
+            print(f"BridgeSelfTest: FAIL · duration_of({item!r}) = {duration_of(item)}, esperado {expected}")
+            return 1
+    albums = [("Vol.1", "Vol.1"), ({"name": "Vol.1"}, "Vol.1"), (None, "")]
+    for raw_album, expected in albums:
+        got = track({"videoId": "x", "album": raw_album})["album"]
+        if got != expected:
+            print(f"BridgeSelfTest: FAIL · album {raw_album!r} virou {got!r}, esperado {expected!r}")
+            return 1
     print("BridgeSelfTest: OK")
     return 0
 
@@ -218,6 +232,19 @@ def like_status(item: dict[str, Any]) -> bool | None:
     return None
 
 
+def duration_of(item: dict[str, Any]) -> int:
+    """Watch-playlist rows carry "4:39" instead of duration_seconds."""
+    seconds = item.get("duration_seconds")
+    if isinstance(seconds, (int, float)) and seconds:
+        return int(seconds)
+    total = 0
+    for part in str(item.get("length") or "").split(":"):
+        if not part.strip().isdigit():
+            return 0
+        total = total * 60 + int(part)
+    return total
+
+
 def track(item: dict[str, Any], kind: str = "song") -> dict[str, Any]:
     if kind == "playlist":
         playlist_id = item.get("playlistId") or item.get("browseId") or ""
@@ -233,10 +260,26 @@ def track(item: dict[str, Any], kind: str = "song") -> dict[str, Any]:
             "duration": 0,
             "url": MUSIC_PLAYLIST_URL.format(playlist_id) if playlist_id else "",
         }
+    if kind == "album":
+        album_id = item.get("browseId") or ""
+        artists = item.get("artists") or []
+        artist = ", ".join(a.get("name", "") for a in artists if a.get("name"))
+        return {
+            "id": album_id,
+            "kind": "album",
+            "title": item.get("title") or "",
+            "subtitle": artist or str(item.get("year") or ""),
+            "album": "",
+            "artwork": artwork(item),
+            "duration": 0,
+            "url": MUSIC_PLAYLIST_URL.format(album_id) if album_id else "",
+        }
     video_id = item.get("videoId") or ""
     artists = item.get("artists") or []
     artist = ", ".join(a.get("name", "") for a in artists if a.get("name"))
-    album = (item.get("album") or {}).get("name", "")
+    # Playlist rows nest the album as an object; album tracks send the title directly.
+    album = item.get("album")
+    album = album.get("name", "") if isinstance(album, dict) else album or ""
     return {
         "id": video_id,
         "kind": "song",
@@ -244,7 +287,7 @@ def track(item: dict[str, Any], kind: str = "song") -> dict[str, Any]:
         "subtitle": artist,
         "album": album or "",
         "artwork": artwork(item),
-        "duration": item.get("duration_seconds") or 0,
+        "duration": duration_of(item),
         "url": MUSIC_WATCH_URL.format(video_id) if video_id else "",
         "liked": like_status(item),
     }
@@ -258,6 +301,38 @@ def playlist_tracks(playlist_id: str) -> list[dict[str, Any]]:
             continue
         tracks.append(track(row))
     return tracks
+
+
+def album_tracks(browse_id: str) -> list[dict[str, Any]]:
+    data = client().get_album(browse_id)
+    return [track(row) for row in data.get("tracks") or [] if row.get("videoId") and row.get("isAvailable") is not False]
+
+
+def radio_tracks(video_id: str) -> list[dict[str, Any]]:
+    """The endless radio built from one song; the limit is a floor, YouTube returns more."""
+    data = client().get_watch_playlist(videoId=video_id, radio=True, limit=RADIO_LIMIT)
+    return [track(row) for row in data.get("tracks") or [] if row.get("videoId")]
+
+
+def home_sections(limit: int = HOME_ROWS) -> list[dict[str, Any]]:
+    """The YouTube Music home rows, keeping only the rows that map to something playable.
+
+    A row carrying a videoId is a song, even when it also carries the RDAMVM playlist id of its
+    radio; that id is not a real playlist and get_playlist rejects it.
+    """
+    sections = []
+    for section in client().get_home(limit=limit):
+        items = []
+        for row in section.get("contents") or []:
+            if row.get("videoId"):
+                items.append(track(row))
+            elif row.get("playlistId"):
+                items.append(track(row, "playlist"))
+            elif str(row.get("browseId") or "").startswith("MPREb"):
+                items.append(track(row, "album"))
+        if items:
+            sections.append({"title": section.get("title") or "", "items": items})
+    return sections
 
 
 # --------------------------------------------------------------------------- mpv IPC
@@ -465,13 +540,14 @@ def queued_track(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def play(kind: str, item_id: str, metadata: dict[str, Any], queue_items: list[dict[str, Any]]) -> None:
-    """Queue a playlist, or the list the song was clicked in (Apple Music style), starting at the song."""
+    """Queue a playlist, album or radio, or the list the song was clicked in (Apple Music style), starting at the song."""
     if not item_id:
         raise RuntimeError("O item não tem um identificador válido.")
-    if kind == "playlist":
-        tracks = playlist_tracks(item_id)
+    collections = {"playlist": playlist_tracks, "album": album_tracks, "radio": radio_tracks}
+    if kind in collections:
+        tracks = collections[kind](item_id)
         if not tracks:
-            raise RuntimeError("A playlist não tem faixas disponíveis.")
+            raise RuntimeError("O item não tem faixas disponíveis.")
         start = 0
     else:
         tracks = [queued_track(raw) for raw in queue_items if raw.get("id")]
@@ -628,6 +704,15 @@ def handle(request: dict[str, Any]) -> None:
         return
     if command == "playlists":
         reply(True, items=[track(row, "playlist") for row in client().get_library_playlists(limit=100) if row.get("playlistId")])
+        return
+    if command == "home":
+        reply(True, sections=home_sections())
+        return
+    if command == "radio":
+        video_id = str(request.get("id") or "")
+        if not video_id:
+            raise RuntimeError("Nenhuma faixa selecionada para iniciar a rádio.")
+        reply(True, items=radio_tracks(video_id))
         return
     if command == "queue":
         queue = load_queue()

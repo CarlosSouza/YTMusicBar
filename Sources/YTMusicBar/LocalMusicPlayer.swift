@@ -64,6 +64,9 @@ final class LocalMusicPlayer: ObservableObject {
         }
     }
 
+    /// A successful catalog load proves the session is alive again.
+    func clearAccessWarning() { accessWarning = nil }
+
     func openYouTubeMusic() {
         NSWorkspace.shared.open(YouTubeMusicURL.home)
     }
@@ -97,6 +100,30 @@ final class LocalMusicPlayer: ObservableObject {
     func playlists() async throws -> CatalogPage { try await catalog(["command": "playlists"], title: "Playlists") }
     /// The whole mpv queue in order, with the metadata saved when it was built.
     func queue() async throws -> CatalogPage { try await catalog(["command": "queue"], title: "Fila") }
+
+    /// The YouTube Music home rows, with the generated playlists and mixes, for the "Para você" tab.
+    func home() async throws -> [HomeSection] {
+        let reply = try await bridge.request(["command": "home"])
+        return reply.sections.map { HomeSection(title: $0.title, items: $0.items.map(Self.mediaItem)) }
+    }
+
+    /// Replaces the queue with the endless radio built from one song.
+    func playRadio(id: String) async throws {
+        _ = try await bridge.request(["command": "play", "kind": "radio", "id": id])
+    }
+
+    private static func mediaItem(_ raw: LocalMusicBridge.RawItem) -> MediaItem {
+        MediaItem(
+            title: raw.title,
+            subtitle: raw.subtitle,
+            album: raw.album,
+            artworkURL: raw.artwork.isEmpty ? nil : URL(string: raw.artwork),
+            destinationURL: URL(string: raw.url) ?? YouTubeMusicURL.home,
+            kind: MediaKind(rawValue: raw.kind) ?? .song,
+            duration: raw.duration,
+            isLiked: raw.liked
+        )
+    }
 
     /// Playlists are expanded by the bridge. A song is queued together with the list it was clicked in,
     /// starting at that song, so previous/next move through the list like Apple Music.
@@ -137,10 +164,7 @@ final class LocalMusicPlayer: ObservableObject {
 
     private func catalog(_ request: [String: Any], title: String) async throws -> CatalogPage {
         let reply = try await bridge.request(request)
-        let items = reply.items.map { raw in
-            MediaItem(title: raw.title, subtitle: raw.subtitle, album: raw.album, artworkURL: raw.artwork.isEmpty ? nil : URL(string: raw.artwork), destinationURL: URL(string: raw.url) ?? YouTubeMusicURL.home, kind: raw.kind == "playlist" ? .playlist : .song, duration: raw.duration, isLiked: raw.liked)
-        }
-        return CatalogPage(title: title, items: items)
+        return CatalogPage(title: title, items: reply.items.map(Self.mediaItem))
     }
 }
 
@@ -154,9 +178,10 @@ private struct LocalMusicBridge {
         let mpv: Bool
         let ytdlp: Bool
         let items: [RawItem]
+        let sections: [RawSection]
         let snapshot: RawSnapshot?
 
-        enum CodingKeys: String, CodingKey { case ok, error, configured, authenticated, account, mpv, ytdlp, items, snapshot }
+        enum CodingKeys: String, CodingKey { case ok, error, configured, authenticated, account, mpv, ytdlp, items, sections, snapshot }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? false
@@ -167,8 +192,14 @@ private struct LocalMusicBridge {
             mpv = try c.decodeIfPresent(Bool.self, forKey: .mpv) ?? false
             ytdlp = try c.decodeIfPresent(Bool.self, forKey: .ytdlp) ?? false
             items = try c.decodeIfPresent([RawItem].self, forKey: .items) ?? []
+            sections = try c.decodeIfPresent([RawSection].self, forKey: .sections) ?? []
             snapshot = try c.decodeIfPresent(RawSnapshot.self, forKey: .snapshot)
         }
+    }
+
+    struct RawSection: Decodable {
+        let title: String
+        let items: [RawItem]
     }
 
     struct RawItem: Decodable {

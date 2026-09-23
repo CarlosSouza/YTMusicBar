@@ -48,8 +48,10 @@ enum YTMusicCoreChecks {
 
         let song = MediaItem(title: "S", subtitle: "", artworkURL: nil, destinationURL: URL(string: "https://music.youtube.com/watch?v=vid42")!)
         let playlist = MediaItem(title: "P", subtitle: "", artworkURL: nil, destinationURL: URL(string: "https://music.youtube.com/playlist?list=PL99")!, kind: .playlist)
+        let album = MediaItem(title: "A", subtitle: "", artworkURL: nil, destinationURL: URL(string: "https://music.youtube.com/playlist?list=MPREb_abc")!, kind: .album)
         try expect(song.remoteID == "vid42", "remoteID da música incorreto.")
         try expect(playlist.remoteID == "PL99", "remoteID da playlist incorreto.")
+        try expect(album.remoteID == "MPREb_abc", "remoteID do álbum incorreto.")
 
         print("YTMusicCoreChecks: OK")
     }

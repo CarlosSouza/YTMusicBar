@@ -6,7 +6,9 @@ The catalog is queried through `ytmusicapi`'s local protocol. Playback uses a si
 
 ## Features
 
-- Everything lives in the menu bar popover, with no windows: player with artwork, draggable progress, transport and volume; search; Queue, Library, Playlists and Results tabs in a scrollable list; Settings and Connect as internal pages.
+- Everything lives in the menu bar popover, with no windows: player with artwork, draggable progress, transport and volume; search; Queue, Library, Playlists, Para você and Results tabs in a scrollable list; Settings and Connect as internal pages.
+- The `Para você` tab mirrors the YouTube Music home rows (Tocar de novo, Meu mix, Quick picks, Recaps...), so the playlists and mixes the service generates for the account show up next to the ones saved in the library.
+- A radio button rebuilds the queue from the track playing now, using the endless radio YouTube Music builds from that song.
 - Local background playback by a single mpv, reused across clicks.
 - Playing a song queues the list it was clicked in (library or results) starting from that song; playlists are queued whole. Previous and next move through the queue.
 - The Queue tab shows played tracks dimmed, the current one highlighted and the upcoming ones; clicking a row jumps to it.
@@ -44,6 +46,12 @@ The headers are stored in `~/Library/Application Support/YTMusicBar/ytmusic-auth
 ## Library, playlists and search
 
 The popover has Library and Playlists tabs; the Results tab appears after a search and the Queue tab while something is loaded. Clicking a song queues the whole list it was in, starting from it; clicking a playlist loads every available track. When the queue ends, the last track stays visible, paused, and the play button restarts it. Rapid clicks are serialized by the bridge and the last one wins, always with a single `mpv` process. Closing the popover keeps playing. Quit (or Cmd-Q) stops mpv before the process exits.
+
+## Para você and radio
+
+`Para você` is the YouTube Music home, grouped by row. Rows mix songs, playlists, mixes and albums, and each one is mapped to what it really is: a song plays with the row it was clicked in, a playlist, mix or recap loads through `get_playlist`, and an album through `get_album`. A row that carries both a videoId and an `RDAMVM` playlist id is a song, because that id is the radio of the song and `get_playlist` rejects it.
+
+The radio button next to the transport rebuilds the queue from the track playing now. It asks for 150 tracks and YouTube usually returns more (around 200 in practice); the radio is rebuilt each time, so it differs between runs. The queue is a snapshot, not a stream: when it ends, the last track stays paused.
 
 Player state lives in `~/Library/Application Support/YTMusicBar/` (`queue.json`, `queue.m3u`, `mpv.pid`, `player.lock`); the mpv IPC socket is `ytmusicbar-mpv.sock` in the user's temporary directory.
 

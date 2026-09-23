@@ -98,9 +98,9 @@ public struct MediaItem: Codable, Identifiable, Equatable, Sendable {
 
     public var id: String { destinationURL.absoluteString }
 
-    /// Identifier the bridge needs to play the item: the video id for songs, the `list` id for playlists.
+    /// Identifier the bridge needs to play the item: the video id for songs, the `list` id for playlists and albums.
     public var remoteID: String {
-        let key = kind == .playlist ? "list" : "v"
+        let key = kind == .song ? "v" : "list"
         return YouTubeMusicURL.queryValue(key, in: destinationURL) ?? ""
     }
 
@@ -119,6 +119,19 @@ public struct MediaItem: Codable, Identifiable, Equatable, Sendable {
 public struct CatalogPage: Codable, Equatable, Sendable {
     public let title: String
     public let items: [MediaItem]
+
+    public init(title: String, items: [MediaItem]) {
+        self.title = title
+        self.items = items
+    }
+}
+
+/// One titled row of the YouTube Music home, as shown in the "Para você" tab.
+public struct HomeSection: Codable, Identifiable, Equatable, Sendable {
+    public let title: String
+    public let items: [MediaItem]
+
+    public var id: String { title }
 
     public init(title: String, items: [MediaItem]) {
         self.title = title
