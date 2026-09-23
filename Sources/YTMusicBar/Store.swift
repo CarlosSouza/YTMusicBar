@@ -67,6 +67,10 @@ final class PlayerStore: ObservableObject {
     private var likeToken: UUID?
     private var playerObservation: AnyCancellable?
     private var catalogLoadedAt: [CatalogTab: Date] = [:]
+    /// Queue size we already tried to extend at, so a source with nothing left is not retried forever.
+    private var extendedAtQueueCount = 0
+    /// How close to the end of the queue triggers a top up.
+    private let extendThreshold = 5
     /// Catalog data older than this is reloaded the next time the popover opens.
     private let catalogStaleAfter: TimeInterval = 300
 
@@ -138,6 +142,13 @@ final class PlayerStore: ObservableObject {
         } catch { connectionMessage = error.localizedDescription }
         // The clicked row keeps its spinner until mpv actually starts producing audio.
         if snapshot?.isPreparing == false, loadingItemID != nil { loadingItemID = nil }
+        // A radio or a mix never really ends, so top the queue up before it runs out. A source with
+        // nothing left adds nothing, the count stays put, and this stops firing on its own.
+        if let snapshot, snapshot.queueCount > extendedAtQueueCount,
+           snapshot.queueCount - snapshot.queueIndex <= extendThreshold {
+            extendedAtQueueCount = snapshot.queueCount
+            extendQueue()
+        }
         if snapshot == nil {
             queueItems = []
             if catalogTab == .queue { catalogTab = .library }
@@ -251,6 +262,7 @@ final class PlayerStore: ObservableObject {
         guard !id.isEmpty else { return }
         let token = item?.id ?? id
         actionMessage = nil
+        extendedAtQueueCount = 0
         loadingItemID = token
         actionTask?.cancel()
         actionTask = Task {
@@ -270,6 +282,7 @@ final class PlayerStore: ObservableObject {
     /// Rapid clicks are serialized by the bridge; the last one wins.
     func play(_ item: MediaItem, in list: [MediaItem] = []) {
         actionMessage = nil
+        extendedAtQueueCount = 0
         loadingItemID = item.id
         actionTask?.cancel()
         actionTask = Task {
@@ -304,12 +317,19 @@ final class PlayerStore: ObservableObject {
 
     private func loadIfNeeded(_ tab: CatalogTab) {
         switch tab {
-        case .queue where queueItems.isEmpty: loadQueue()
+        case .queue:
+            // The queue grows while it plays, so reload once the row count no longer matches.
+            if queueItems.isEmpty || queueItems.count != (snapshot?.queueCount ?? 0) { loadQueue() }
         case .library where librarySongs.isEmpty: loadLibrary()
         case .playlists where playlists.isEmpty: loadPlaylists()
         case .forYou where homeSections.isEmpty: loadForYou()
         default: break
         }
+    }
+
+    /// Tops the queue up from its own source. The queue tab picks the new rows up on its own.
+    private func extendQueue() {
+        Task { _ = try? await player.extendQueue() }
     }
 
     private func loadCatalog(_ request: @escaping () async throws -> CatalogPage, _ assign: @escaping (CatalogPage) -> Void) {

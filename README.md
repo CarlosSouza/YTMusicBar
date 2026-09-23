@@ -8,7 +8,7 @@ The catalog is queried through `ytmusicapi`'s local protocol. Playback uses a si
 
 - Everything lives in the menu bar popover, the sign-in window being the only exception: player with artwork, draggable progress, transport and volume; search; Queue, Library, Playlists, Para você and Results tabs in a scrollable list; Settings and Connect as internal pages.
 - The `Para você` tab mirrors the YouTube Music home rows (Tocar de novo, Meu mix, Quick picks, Recaps...), so the playlists and mixes the service generates for the account show up next to the ones saved in the library.
-- A radio button rebuilds the queue from the track playing now, using the endless radio YouTube Music builds from that song.
+- A radio button rebuilds the queue from the track playing now, using the endless radio YouTube Music builds from that song. Radio and mix queues top themselves up before they run out, so they keep going.
 - Local background playback by a single mpv, reused across clicks.
 - Playing a song queues the list it was clicked in (library or results) starting from that song; playlists are queued whole. Previous and next move through the queue.
 - The Queue tab shows played tracks dimmed, the current one highlighted and the upcoming ones; clicking a row jumps to it.
@@ -78,7 +78,7 @@ The checks cover URLs, progress estimation, duration formatting, queue ids and t
 ## Known limits
 
 - `ytmusicapi` and `yt-dlp` depend on YouTube's internal APIs and protocols and may need updates.
-- Opening a playlist or a personalized mix queues up to about 400 tracks. The personalized mixes are effectively endless, so asking for all of them never returns, and the request is capped instead.
+- Opening a playlist or a personalized mix queues about 400 tracks at first, because the personalized mixes are effectively endless and asking for all of them never returns. A radio or a mix then tops itself up as it plays, five tracks before the end, up to 2000 tracks; a finite playlist simply stops growing once it is exhausted.
 - Starting a track is not instant: mpv resolves the stream with `yt-dlp` first, which takes a second or two. The progress bar shows a spinner during that window instead of counting from zero, and the row keeps its spinner until audio actually starts.
 - Authentication cookies expire. Signing in now happens in a `WKWebView` the app owns, so the session is in WebKit's cookie store rather than a copy taken from another browser, but the app does not yet re-read that store when its stored copy goes stale.
 - The app does not bypass ads, DRM, geographic restrictions or YouTube Premium requirements.

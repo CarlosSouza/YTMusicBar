@@ -114,6 +114,11 @@ final class LocalMusicPlayer: ObservableObject {
         _ = try await bridge.request(["command": "play", "kind": "radio", "id": id])
     }
 
+    /// Tops the queue up from its own source; returns how many tracks were added.
+    func extendQueue() async throws -> Int {
+        try await bridge.request(["command": "extend"]).added
+    }
+
     private static func mediaItem(_ raw: LocalMusicBridge.RawItem) -> MediaItem {
         MediaItem(
             title: raw.title,
@@ -185,8 +190,9 @@ private struct LocalMusicBridge {
         let items: [RawItem]
         let sections: [RawSection]
         let snapshot: RawSnapshot?
+        let added: Int
 
-        enum CodingKeys: String, CodingKey { case ok, error, configured, authenticated, account, mpv, ytdlp, items, sections, snapshot }
+        enum CodingKeys: String, CodingKey { case ok, error, configured, authenticated, account, mpv, ytdlp, items, sections, snapshot, added }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? false
@@ -199,6 +205,7 @@ private struct LocalMusicBridge {
             items = try c.decodeIfPresent([RawItem].self, forKey: .items) ?? []
             sections = try c.decodeIfPresent([RawSection].self, forKey: .sections) ?? []
             snapshot = try c.decodeIfPresent(RawSnapshot.self, forKey: .snapshot)
+            added = try c.decodeIfPresent(Int.self, forKey: .added) ?? 0
         }
     }
 

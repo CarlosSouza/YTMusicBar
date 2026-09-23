@@ -61,6 +61,8 @@ HOME_ROWS = 20
 # Playlists are the same: the limit is a floor, each page adds a couple hundred tracks. Personalized
 # mixes never end, so fetching "all of it" never returns. A few hundred is already many hours.
 PLAYLIST_LIMIT = 300
+# Ceiling for a queue that keeps extending itself; a few thousand tracks is already days of music.
+MAX_QUEUE = 2000
 
 
 def reply(ok: bool, **payload: Any) -> None:
@@ -317,8 +319,8 @@ def track(item: dict[str, Any], kind: str = "song") -> dict[str, Any]:
     }
 
 
-def playlist_tracks(playlist_id: str) -> list[dict[str, Any]]:
-    data = client().get_playlist(playlist_id, limit=PLAYLIST_LIMIT)
+def playlist_tracks(playlist_id: str, limit: int = PLAYLIST_LIMIT) -> list[dict[str, Any]]:
+    data = client().get_playlist(playlist_id, limit=limit)
     tracks = []
     for row in data.get("tracks") or []:
         if not row.get("videoId") or row.get("isAvailable") is False:
@@ -604,7 +606,53 @@ def play(kind: str, item_id: str, metadata: dict[str, Any], queue_items: list[di
         ensure_mpv()
         load_queue_into_mpv([WATCH_URL.format(t["id"]) for t in tracks], start)
         mpv_request(["set_property", "pause", False])
-        save_queue({"order": [t["id"] for t in tracks], "tracks": {t["id"]: t for t in tracks}, "lastVideoId": tracks[start]["id"]})
+        save_queue({
+            "order": [t["id"] for t in tracks],
+            "tracks": {t["id"]: t for t in tracks},
+            "lastVideoId": tracks[start]["id"],
+            # Remember where the queue came from so it can be topped up later. A finite list is
+            # already queued whole, and an album ends, so only these two are worth extending.
+            "source": {"kind": kind, "id": item_id} if kind in ("playlist", "radio") else {},
+        })
+
+
+def extend_queue() -> int:
+    """Appends more tracks from the queue's own source, so a radio or a mix keeps going.
+
+    Returns how many tracks were added. Zero means the source has nothing left, or the queue
+    changed while the fetch was in flight.
+    """
+    queue = load_queue()
+    source = queue.get("source") or {}
+    kind = str(source.get("kind") or "")
+    item_id = str(source.get("id") or "")
+    order: list[str] = queue.get("order") or []
+    if not item_id or not order or len(order) >= MAX_QUEUE:
+        return 0
+    tail = order[-1]
+    if kind == "radio":
+        # A radio is regenerated on every call, so continue it from the track the queue ends on.
+        fresh = radio_tracks(tail)
+    elif kind == "playlist":
+        # The limit is a floor, so asking for what we already have returns that plus the next page.
+        fresh = playlist_tracks(item_id, limit=len(order))
+    else:
+        return 0
+    known = set(order)
+    added = [t for t in fresh if t["id"] not in known]
+    if not added:
+        return 0
+    with player_lock():
+        current = load_queue()
+        if (current.get("order") or [])[-1:] != [tail] or not mpv_alive():
+            return 0
+        QUEUE_LIST_FILE.write_text("\n".join(WATCH_URL.format(t["id"]) for t in added) + "\n", encoding="utf-8")
+        if not mpv_request(["loadlist", str(QUEUE_LIST_FILE), "append"], timeout=2.0):
+            return 0
+        current["order"] = [*current["order"], *(t["id"] for t in added)]
+        current["tracks"].update({t["id"]: t for t in added})
+        save_queue(current)
+    return len(added)
 
 
 def load_queue_into_mpv(urls: list[str], start: int) -> None:
@@ -760,6 +808,9 @@ def handle(request: dict[str, Any]) -> None:
         if not video_id:
             raise RuntimeError("Nenhuma faixa selecionada para iniciar a rádio.")
         reply(True, items=radio_tracks(video_id))
+        return
+    if command == "extend":
+        reply(True, added=extend_queue())
         return
     if command == "queue":
         queue = load_queue()
