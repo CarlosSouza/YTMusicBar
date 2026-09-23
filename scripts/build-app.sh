@@ -28,6 +28,10 @@ binary_dir="$(swift build \
 
 YTMUSICBAR_VALIDATE_LOCAL=1 "$binary_dir/YTMusicBar"
 
+if [[ -x .ytmusic-venv/bin/python ]]; then
+    .ytmusic-venv/bin/python scripts/ytmusic_bridge.py --selftest
+fi
+
 app_path="$PWD/dist/YTMusicBar.app"
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 if [[ -e "$app_path/Contents/Resources/.ytmusic-venv" ]]; then

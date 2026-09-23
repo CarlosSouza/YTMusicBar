@@ -18,6 +18,7 @@ import fcntl
 import json
 import os
 import pathlib
+import re
 import shutil
 import signal
 import socket
@@ -30,6 +31,8 @@ from urllib.parse import parse_qs, urlparse
 
 try:
     from ytmusicapi import YTMusic
+    from ytmusicapi.constants import YTM_DOMAIN
+    from ytmusicapi.helpers import get_authorization, sapisid_from_cookie
     from ytmusicapi.models.content.enums import LikeStatus
 except ImportError as exc:  # pragma: no cover - exercised by setup diagnostics
     YTMusic = None  # type: ignore[assignment]
@@ -72,6 +75,128 @@ def client() -> Any:
             f"Arquivo esperado: {AUTH_FILE}"
         )
     return YTMusic(str(AUTH_FILE))
+
+
+# --------------------------------------------------------------------------- auth
+
+
+CURL_HEADER = re.compile(r"(?:-H|--header)\s+(?:'([^']*)'|\"([^\"]*)\")")
+SESSION_EXPIRED = (
+    "As credenciais foram salvas, mas o YouTube Music respondeu como sessão encerrada. "
+    "Abra o YouTube Music logado no navegador, copie os request headers de uma requisição /browse e importe de novo."
+)
+
+
+def header_pairs(raw: str) -> dict[str, str]:
+    text = raw.replace("\r\n", "\n").strip()
+    if text.startswith("curl") or "\ncurl " in text:
+        lines = [first or second for first, second in CURL_HEADER.findall(text)]
+    else:
+        lines = [line for line in text.split("\n") if not line.lstrip().startswith(":")]
+    headers: dict[str, str] = {}
+    for line in lines:
+        key, separator, value = line.partition(":")
+        if separator and key.strip():
+            headers[key.strip().lower()] = value.strip()
+    return headers
+
+
+def parse_auth_input(raw: str) -> tuple[str, str]:
+    """Reads a browser header block, a cURL command or a bare cookie value."""
+    headers = header_pairs(raw)
+    cookie = headers.get("cookie") or (raw.strip() if "__Secure-3PAPISID" in raw else "")
+    if not cookie:
+        raise RuntimeError(
+            "Não encontrei o header cookie. Copie os request headers de uma requisição /browse, "
+            "o comando cURL ou apenas o valor do header cookie."
+        )
+    return cookie, headers.get("x-goog-authuser") or "0"
+
+
+def auth_headers(cookie: str, authuser: str) -> str:
+    """Rebuilds the minimal header block; ytmusicapi regenerates the SAPISIDHASH on every request."""
+    try:
+        sapisid = sapisid_from_cookie(cookie)
+    except (KeyError, TypeError):
+        raise RuntimeError(
+            "O cookie não contém __Secure-3PAPISID. Confirme que a sessão do YouTube Music está aberta no navegador."
+        ) from None
+    return "\n".join([
+        f"cookie: {cookie}",
+        f"x-goog-authuser: {authuser}",
+        f"authorization: {get_authorization(sapisid + ' ' + YTM_DOMAIN)}",
+    ])
+
+
+def verify_auth(path: pathlib.Path) -> str:
+    """Confirms the stored credentials are signed in and returns the account name when available."""
+    probe = YTMusic(str(path))
+    try:
+        response = probe._send_request("browse", {"browseId": "FEmusic_liked_playlists"})
+    except Exception as exc:
+        raise RuntimeError(SESSION_EXPIRED) from exc
+    params = (response.get("responseContext") or {}).get("serviceTrackingParams") or []
+    signed_in = any(
+        entry.get("key") == "logged_in" and entry.get("value") == "1"
+        for service in params
+        for entry in service.get("params") or []
+    )
+    if not signed_in:
+        raise RuntimeError(SESSION_EXPIRED)
+    with contextlib.suppress(Exception):
+        return probe.get_account_info().get("accountName") or ""
+    return ""
+
+
+def configure_auth(raw: str) -> str:
+    """Writes the auth file only after the credentials proved to be signed in."""
+    cookie, authuser = parse_auth_input(raw)
+    headers = auth_headers(cookie, authuser)
+    APP_SUPPORT.mkdir(parents=True, exist_ok=True)
+    pending = AUTH_FILE.with_name(AUTH_FILE.name + ".pending")
+    import ytmusicapi
+
+    ytmusicapi.setup(filepath=str(pending), headers_raw=headers)
+    try:
+        account = verify_auth(pending)
+    except Exception:
+        pending.unlink(missing_ok=True)
+        raise
+    pending.replace(AUTH_FILE)
+    return account
+
+
+def selftest() -> int:
+    """Offline checks for the auth import, run with --selftest."""
+    if YTMusic is None:
+        print(f"BridgeSelfTest: FAIL · ytmusicapi indisponível: {IMPORT_ERROR}")
+        return 1
+
+    def prepare(raw: str) -> tuple[str, str]:
+        """Same path configure_auth takes: read the input, then rebuild the headers."""
+        cookie, authuser = parse_auth_input(raw)
+        return cookie, auth_headers(cookie, authuser)
+
+    cookie = "__Secure-3PAPISID=abc123; __Secure-3PSID=def456"
+    accepted = [
+        (f"cookie: {cookie}\nx-goog-authuser: 3", "3"),
+        (f"curl 'https://music.youtube.com/youtubei/v1/browse' -H 'cookie: {cookie}' -H 'x-goog-authuser: 1'", "1"),
+        (cookie, "0"),
+    ]
+    for raw, expected_user in accepted:
+        parsed_cookie, headers = prepare(raw)
+        if parsed_cookie != cookie or f"x-goog-authuser: {expected_user}" not in headers or "SAPISIDHASH" not in headers:
+            print(f"BridgeSelfTest: FAIL · {raw[:40]!r} → {parsed_cookie[:30]!r}")
+            return 1
+    for raw in ("nada aqui", "cookie: FOO=bar; BAZ=qux", ""):
+        try:
+            prepare(raw)
+        except RuntimeError:
+            continue
+        print(f"BridgeSelfTest: FAIL · aceitou entrada inválida {raw!r}")
+        return 1
+    print("BridgeSelfTest: OK")
+    return 0
 
 
 # --------------------------------------------------------------------------- catalog
@@ -476,13 +601,20 @@ def handle(request: dict[str, Any]) -> None:
     if command == "configure":
         if YTMusic is None:
             raise RuntimeError(f"ytmusicapi não está instalado: {IMPORT_ERROR}")
-        headers = str(request.get("headers", "")).strip()
-        if len(headers) < 40:
-            raise RuntimeError("Cole os headers completos da requisição /browse.")
-        # ytmusicapi writes the auth file locally; the raw headers never go to logs.
-        import ytmusicapi
-        ytmusicapi.setup(filepath=str(AUTH_FILE), headers_raw=headers)
-        reply(True, configured=AUTH_FILE.exists())
+        # The auth file is only replaced after the credentials proved to be signed in.
+        account = configure_auth(str(request.get("headers", "")))
+        reply(True, configured=True, authenticated=True, account=account)
+        return
+    if command == "verify":
+        if not AUTH_FILE.exists():
+            reply(True, configured=False, authenticated=False)
+            return
+        try:
+            account = verify_auth(AUTH_FILE)
+        except Exception as exc:
+            reply(True, configured=True, authenticated=False, error=str(exc))
+            return
+        reply(True, configured=True, authenticated=True, account=account)
         return
     if command == "status":
         reply(True, configured=AUTH_FILE.exists(), mpv=pathlib.Path(MPV_BINARY).exists(), ytdlp=pathlib.Path(YTDLP_BINARY).exists(), snapshot=snapshot())
@@ -553,4 +685,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     main()

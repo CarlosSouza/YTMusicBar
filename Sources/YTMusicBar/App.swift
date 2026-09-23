@@ -66,6 +66,7 @@ private final class AuthDraft: ObservableObject {
     @Published var headers = ""
     @Published var isSaving = false
     @Published var message: String?
+    @Published var isError = false
 }
 
 // MARK: - Interaction primitives
@@ -562,8 +563,16 @@ private struct SettingsPanel: View {
                 }.padding(4).frame(maxWidth: .infinity, alignment: .leading)
             }
             GroupBox("Conta") {
-                HStack {
-                    Text(store.isConfigured ? "Acesso configurado." : "Acesso ainda não configurado.").font(.callout)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(accountStatus).font(.callout)
+                        if let warning = store.player.accessWarning {
+                            Text(warning)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                     Spacer()
                     Button(store.isConfigured ? "Reconfigurar…" : "Configurar acesso…") { store.go(to: .auth) }
                         .buttonStyle(PressScaleStyle(scale: 0.96))
@@ -574,6 +583,13 @@ private struct SettingsPanel: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task { await store.player.verifyAccess() }
+    }
+
+    private var accountStatus: String {
+        guard store.isConfigured else { return "Acesso ainda não configurado." }
+        guard let name = store.player.accountName, !name.isEmpty else { return "Acesso configurado." }
+        return "Conectado como \(name)."
     }
 }
 
@@ -600,6 +616,13 @@ struct AuthSetupView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("No YouTube Music: pressione ⌘⌥I → Network → clique em Biblioteca → abra a requisição /browse → botão direito → Copy → Copy request headers.")
                         .font(.caption)
+                    HStack(spacing: 8) {
+                        Button("Importar da área de transferência") { importFromClipboard() }
+                            .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                            .disabled(draft.isSaving)
+                        Text("ou cole manualmente abaixo").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                    }
                     TextEditor(text: $draft.headers)
                         .font(.system(.caption, design: .monospaced))
                         .frame(minHeight: 110, maxHeight: .infinity)
@@ -610,7 +633,11 @@ struct AuthSetupView: View {
                 }.padding(4)
             }
             if let message = draft.message {
-                Text(message).font(.callout).foregroundStyle(.secondary).transition(.opacity.combined(with: .move(edge: .top)))
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(draft.isError ? .orange : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
             HStack {
                 Spacer()
@@ -623,19 +650,33 @@ struct AuthSetupView: View {
         .animation(.snappy(duration: 0.25), value: draft.message == nil)
     }
 
+    private func importFromClipboard() {
+        let clipboard = (NSPasteboard.general.string(forType: .string) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clipboard.isEmpty else {
+            draft.message = "A área de transferência está vazia. Copie os request headers no navegador primeiro."
+            draft.isError = true
+            return
+        }
+        draft.headers = clipboard
+        save()
+    }
+
     private func save() {
         draft.isSaving = true
         draft.message = nil
+        draft.isError = false
         Task {
             do {
-                try await store.player.configure(rawHeaders: draft.headers)
+                let account = try await store.player.configure(rawHeaders: draft.headers)
                 draft.headers = ""
-                draft.message = "Acesso configurado."
+                draft.message = account.isEmpty ? "Acesso configurado." : "Conectado como \(account)."
                 draft.isSaving = false
                 store.requestRefresh()
                 onDone()
             } catch {
-                draft.message = "Não foi possível configurar: \(error.localizedDescription)"
+                draft.message = error.localizedDescription
+                draft.isError = true
                 draft.isSaving = false
             }
         }

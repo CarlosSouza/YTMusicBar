@@ -35,10 +35,11 @@ The script produces an ad hoc signed app for local use. Public distribution stil
 ## First run
 
 1. Open YTMusicBar from the menu bar.
-2. Click **Configure access…**. The page explains each step, opens YouTube Music and takes the headers pasted directly into the popover. No Terminal needed.
-3. After saving, use search or the Library tab and click a song; the controls appear in the popover and the title in the menu bar.
+2. Click **Configure access…**. The page explains each step and opens YouTube Music. Copy the request headers of a `/browse` call from the browser network panel and press **Importar da área de transferência**, or paste them into the box by hand. The headers block, a `Copy as cURL` command and the bare `cookie` value are all accepted. No Terminal needed.
+3. The credentials are written to disk only after the app confirms the session is signed in, so a stale copy is rejected instead of silently saved. On success the account name appears in Settings, where **Reconfigurar…** and the expiry warning live.
+4. After saving, use search or the Library tab and click a song; the controls appear in the popover and the title in the menu bar.
 
-The headers are stored in `~/Library/Application Support/YTMusicBar/ytmusic-auth.json` and used only by the local bridge. The browser is not needed after setup. They are sensitive credentials and must not be shared.
+The headers are stored in `~/Library/Application Support/YTMusicBar/ytmusic-auth.json` and used only by the local bridge. Only the cookie and the account index are kept; the `SAPISIDHASH` is regenerated on every request. The browser is not needed after setup. They are sensitive credentials and must not be shared.
 
 ## Library, playlists and search
 
@@ -57,16 +58,18 @@ swift run \
   --disable-sandbox \
   YTMusicCoreChecks
 
+.ytmusic-venv/bin/python scripts/ytmusic_bridge.py --selftest
+
 plutil -lint dist/YTMusicBar.app/Contents/Info.plist
 codesign --verify --deep --strict dist/YTMusicBar.app
 ```
 
-The checks cover URLs, progress estimation, duration formatting, queue ids, the Python bridge and the presence of `mpv`/`yt-dlp`.
+The checks cover URLs, progress estimation, duration formatting, queue ids and the presence of `mpv`/`yt-dlp`. `--selftest` covers the auth import: header block, cURL command, bare cookie and the rejected inputs. Both run as part of `scripts/build-app.sh`.
 
 ## Known limits
 
 - `ytmusicapi` and `yt-dlp` depend on YouTube's internal APIs and protocols and may need updates.
-- Authentication headers can expire and need to be redone.
+- Authentication cookies expire and have to be imported again. `ytmusicapi` does not rotate the `__Secure-*PSIDTS` cookies that the browser refreshes, which is the usual reason a working session goes stale.
 - The app does not bypass ads, DRM, geographic restrictions or YouTube Premium requirements.
 - The local build is ad hoc signed and not ready for distribution outside this machine.
 

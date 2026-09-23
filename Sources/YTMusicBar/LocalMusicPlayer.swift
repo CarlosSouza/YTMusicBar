@@ -7,6 +7,8 @@ final class LocalMusicPlayer: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isReady = false
     @Published private(set) var isConfigured = false
+    @Published private(set) var accountName: String?
+    @Published private(set) var accessWarning: String?
     @Published private(set) var statusMessage = "Verificando o player local…"
     @Published private(set) var lastError: String?
 
@@ -42,9 +44,24 @@ final class LocalMusicPlayer: ObservableObject {
         }
     }
 
-    func configure(rawHeaders: String) async throws {
-        _ = try await bridge.request(["command": "configure", "headers": rawHeaders])
+    /// Stores the credentials and returns the account name; the bridge only saves them after a signed-in probe.
+    func configure(rawHeaders: String) async throws -> String {
+        let reply = try await bridge.request(["command": "configure", "headers": rawHeaders])
+        accountName = reply.account
+        accessWarning = nil
         refreshStatus()
+        return reply.account ?? ""
+    }
+
+    func verifyAccess() async {
+        do {
+            let reply = try await bridge.request(["command": "verify"])
+            isConfigured = reply.configured
+            accountName = reply.authenticated ? reply.account : nil
+            accessWarning = reply.authenticated ? nil : reply.error
+        } catch {
+            accessWarning = error.localizedDescription
+        }
     }
 
     func openYouTubeMusic() {
@@ -132,17 +149,21 @@ private struct LocalMusicBridge {
         let ok: Bool
         let error: String?
         let configured: Bool
+        let authenticated: Bool
+        let account: String?
         let mpv: Bool
         let ytdlp: Bool
         let items: [RawItem]
         let snapshot: RawSnapshot?
 
-        enum CodingKeys: String, CodingKey { case ok, error, configured, mpv, ytdlp, items, snapshot }
+        enum CodingKeys: String, CodingKey { case ok, error, configured, authenticated, account, mpv, ytdlp, items, snapshot }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? false
             error = try c.decodeIfPresent(String.self, forKey: .error)
             configured = try c.decodeIfPresent(Bool.self, forKey: .configured) ?? false
+            authenticated = try c.decodeIfPresent(Bool.self, forKey: .authenticated) ?? false
+            account = try c.decodeIfPresent(String.self, forKey: .account)
             mpv = try c.decodeIfPresent(Bool.self, forKey: .mpv) ?? false
             ytdlp = try c.decodeIfPresent(Bool.self, forKey: .ytdlp) ?? false
             items = try c.decodeIfPresent([RawItem].self, forKey: .items) ?? []
