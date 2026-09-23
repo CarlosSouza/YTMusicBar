@@ -342,10 +342,12 @@ private struct CatalogList: View {
             isCurrent: store.isCurrent(at: index, item),
             isPlayed: store.isPlayed(at: index),
             isPlaying: store.snapshot?.isPaused == false,
-            isLoading: store.loadingItemID == item.id
-        ) {
-            if store.catalogTab == .queue { store.jump(to: index) } else { store.play(item, in: list) }
-        }
+            isLoading: store.loadingItemID == item.id,
+            play: {
+                if store.catalogTab == .queue { store.jump(to: index) } else { store.play(item, in: list) }
+            },
+            radio: { store.startRadio(from: item) }
+        )
     }
 
     /// Keeps the playing track in view on the queue tab.
@@ -391,9 +393,18 @@ private struct CatalogRow: View {
     let isPlaying: Bool
     let isLoading: Bool
     let play: () -> Void
+    let radio: () -> Void
     @StateObject private var hover = HoverState()
 
     var body: some View {
+        if item.kind == .song, !item.remoteID.isEmpty {
+            content.contextMenu { Button("Iniciar rádio a partir desta música") { radio() } }
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         Button(action: play) {
             HStack(spacing: 10) {
                 ZStack {
@@ -424,7 +435,7 @@ private struct CatalogRow: View {
                 Spacer(minLength: 8)
                 if item.duration > 0 {
                     Text(DurationFormatting.clock(item.duration)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                } else if item.kind == .playlist {
+                } else if item.kind != .song {
                     Image(systemName: hover.isHovering ? "play.circle.fill" : "play.circle")
                         .foregroundStyle(hover.isHovering ? AppTheme.accent : .secondary)
                         .contentTransition(.symbolEffect(.replace))
@@ -442,7 +453,7 @@ private struct CatalogRow: View {
         .animation(AppTheme.hover, value: isLoading)
         .animation(AppTheme.hover, value: isCurrent)
         .animation(AppTheme.hover, value: isPlayed)
-        .help(item.kind == .playlist ? "Tocar playlist" : "Tocar")
+        .help(item.kind == .song ? "Tocar" : "Tocar \(item.kind.displayName.lowercased())")
     }
 }
 
@@ -548,7 +559,7 @@ private struct Transport: View {
                 size: 32,
                 isDisabled: snapshot == nil,
                 help: "Rádio a partir desta faixa",
-                action: store.startRadio
+                action: { store.startRadio() }
             )
         }
     }

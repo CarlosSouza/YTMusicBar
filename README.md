@@ -51,7 +51,7 @@ The popover has Library and Playlists tabs; the Results tab appears after a sear
 
 `Para você` is the YouTube Music home, grouped by row. Rows mix songs, playlists, mixes and albums, and each one is mapped to what it really is: a song plays with the row it was clicked in, a playlist, mix or recap loads through `get_playlist`, and an album through `get_album`. A row that carries both a videoId and an `RDAMVM` playlist id is a song, because that id is the radio of the song and `get_playlist` rejects it.
 
-The radio button next to the transport rebuilds the queue from the track playing now. It asks for 150 tracks and YouTube usually returns more (around 200 in practice); the radio is rebuilt each time, so it differs between runs. The queue is a snapshot, not a stream: when it ends, the last track stays paused.
+The radio button next to the transport rebuilds the queue from the track playing now, and any song row offers the same action in its context menu. It asks for 150 tracks and YouTube usually returns more (around 200 in practice); the radio is rebuilt each time, so it differs between runs. The queue is a snapshot, not a stream: when it ends, the last track stays paused.
 
 Player state lives in `~/Library/Application Support/YTMusicBar/` (`queue.json`, `queue.m3u`, `mpv.pid`, `player.lock`); the mpv IPC socket is `ytmusicbar-mpv.sock` in the user's temporary directory.
 

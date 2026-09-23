@@ -198,11 +198,13 @@ final class PlayerStore: ObservableObject {
         }
     }
 
-    /// Replaces the queue with the radio built from the track playing now.
-    func startRadio() {
-        guard let id = snapshot?.videoID, !id.isEmpty else { return }
+    /// Replaces the queue with the radio built from `item`, or from the track playing now when none is given.
+    func startRadio(from item: MediaItem? = nil) {
+        let id = item?.remoteID ?? snapshot?.videoID ?? ""
+        guard !id.isEmpty else { return }
+        let token = item?.id ?? id
         actionMessage = nil
-        loadingItemID = id
+        loadingItemID = token
         actionTask?.cancel()
         actionTask = Task {
             do {
@@ -211,7 +213,7 @@ final class PlayerStore: ObservableObject {
                 await refresh()
             } catch is CancellationError {
             } catch { actionMessage = error.localizedDescription }
-            if loadingItemID == id { loadingItemID = nil }
+            if loadingItemID == token { loadingItemID = nil }
         }
     }
 
