@@ -63,6 +63,7 @@ final class PlayerStore: ObservableObject {
     private let defaults: UserDefaults
     private var pollTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
+    private var actionMessageTask: Task<Void, Never>?
     private var likeToken: UUID?
     private var playerObservation: AnyCancellable?
     private var catalogLoadedAt: [CatalogTab: Date] = [:]
@@ -81,7 +82,18 @@ final class PlayerStore: ObservableObject {
     }
 
     deinit {
-        pollTask?.cancel(); actionTask?.cancel()
+        pollTask?.cancel(); actionTask?.cancel(); actionMessageTask?.cancel()
+    }
+
+    /// Failures are transient, so the banner clears itself instead of sitting there until the next action.
+    private func showAction(_ message: String) {
+        actionMessage = message
+        actionMessageTask?.cancel()
+        actionMessageTask = Task {
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            actionMessage = nil
+        }
     }
 
     var menuTitle: String {
@@ -204,7 +216,7 @@ final class PlayerStore: ObservableObject {
                 try await player.setLiked(target, id: id)
                 await refresh()
             } catch is CancellationError {
-            } catch { actionMessage = error.localizedDescription }
+            } catch { showAction(error.localizedDescription) }
         }
     }
 
@@ -249,7 +261,7 @@ final class PlayerStore: ObservableObject {
                 catalogTab = .queue
                 await refresh()
             } catch is CancellationError {
-            } catch { actionMessage = error.localizedDescription }
+            } catch { showAction(error.localizedDescription) }
             if loadingItemID == token { loadingItemID = nil }
         }
     }
@@ -269,7 +281,7 @@ final class PlayerStore: ObservableObject {
             } catch is CancellationError {
                 if loadingItemID == item.id { loadingItemID = nil }
             } catch {
-                actionMessage = error.localizedDescription
+                showAction(error.localizedDescription)
                 if loadingItemID == item.id { loadingItemID = nil }
             }
         }
@@ -283,7 +295,7 @@ final class PlayerStore: ObservableObject {
                 try await player.perform(action, currentID: snapshot?.videoID)
                 try? await Task.sleep(for: .milliseconds(180))
                 await refresh()
-            } catch is CancellationError {} catch { actionMessage = error.localizedDescription }
+            } catch is CancellationError {} catch { showAction(error.localizedDescription) }
         }
     }
 

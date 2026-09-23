@@ -58,6 +58,9 @@ MUSIC_PLAYLIST_URL = "https://music.youtube.com/playlist?list={}"
 # The radio endpoint treats the limit as a floor and usually returns more.
 RADIO_LIMIT = 150
 HOME_ROWS = 20
+# Playlists are the same: the limit is a floor, each page adds a couple hundred tracks. Personalized
+# mixes never end, so fetching "all of it" never returns. A few hundred is already many hours.
+PLAYLIST_LIMIT = 300
 
 
 def reply(ok: bool, **payload: Any) -> None:
@@ -315,7 +318,7 @@ def track(item: dict[str, Any], kind: str = "song") -> dict[str, Any]:
 
 
 def playlist_tracks(playlist_id: str) -> list[dict[str, Any]]:
-    data = client().get_playlist(playlist_id, limit=None)
+    data = client().get_playlist(playlist_id, limit=PLAYLIST_LIMIT)
     tracks = []
     for row in data.get("tracks") or []:
         if not row.get("videoId") or row.get("isAvailable") is False:

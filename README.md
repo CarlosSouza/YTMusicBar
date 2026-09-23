@@ -78,6 +78,7 @@ The checks cover URLs, progress estimation, duration formatting, queue ids and t
 ## Known limits
 
 - `ytmusicapi` and `yt-dlp` depend on YouTube's internal APIs and protocols and may need updates.
+- Opening a playlist or a personalized mix queues up to about 400 tracks. The personalized mixes are effectively endless, so asking for all of them never returns, and the request is capped instead.
 - Starting a track is not instant: mpv resolves the stream with `yt-dlp` first, which takes a second or two. The progress bar shows a spinner during that window instead of counting from zero, and the row keeps its spinner until audio actually starts.
 - Authentication cookies expire. Signing in now happens in a `WKWebView` the app owns, so the session is in WebKit's cookie store rather than a copy taken from another browser, but the app does not yet re-read that store when its stored copy goes stale.
 - The app does not bypass ads, DRM, geographic restrictions or YouTube Premium requirements.
