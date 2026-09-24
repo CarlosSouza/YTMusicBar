@@ -18,6 +18,7 @@ The catalog is queried through `ytmusicapi`'s local protocol. Playback uses a si
 - Save a playlist or album to the library from its context menu, and remove it from the Playlists tab, where everything already is the library.
 - mpv volume and mute.
 - No Apple Events and no macOS Automation permission.
+- On macOS 26 the popover and its controls use Liquid Glass; earlier systems keep the previous materials and button styles.
 
 ## Build
 
@@ -34,6 +35,8 @@ open dist/YTMusicBar.app
 ```
 
 The script produces an ad hoc signed app for local use. Public distribution still needs a Developer ID and notarization.
+
+SwiftPM stamps the deployment target (14.0) as the SDK version, which makes macOS run the app in compatibility mode with the old design. The build restamps the binary with the real SDK via `xcrun vtool` before codesigning, so on macOS 26 the menu bar popover adopts Liquid Glass automatically. The glass button styles are guarded by `#available(macOS 26.0, *)`, so macOS 14 and 15 keep the previous look.
 
 ## First run
 

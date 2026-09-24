@@ -87,6 +87,30 @@ private struct PressScaleStyle: ButtonStyle {
     }
 }
 
+// MARK: - Liquid Glass (macOS 26+)
+
+/// On macOS 26 the controls adopt Liquid Glass; earlier systems keep the styles below.
+private extension View {
+    /// Standard glass button, falling back to the custom press style.
+    @ViewBuilder
+    func glassButton(fallback: PressScaleStyle = PressScaleStyle()) -> some View {
+        if #available(macOS 26.0, *) { buttonStyle(.glass) } else { buttonStyle(fallback) }
+    }
+
+    /// Prominent glass button for primary actions, falling back to bordered prominent.
+    @ViewBuilder
+    func glassProminentButton() -> some View {
+        if #available(macOS 26.0, *) { buttonStyle(.glassProminent) } else { buttonStyle(.borderedProminent) }
+    }
+
+    /// The menu bar popover already draws Liquid Glass behind its content on macOS 26;
+    /// painting a material on top would hide it (and stack glass on glass).
+    @ViewBuilder
+    func panelBackground() -> some View {
+        if #available(macOS 26.0, *) { self } else { background(.regularMaterial) }
+    }
+}
+
 /// Icon-only button with a circular hover highlight and press feedback.
 private struct IconButton: View {
     let systemName: String
@@ -134,7 +158,7 @@ struct PlayerPanel: View {
         .padding(16)
         .frame(width: AppTheme.panelWidth, height: AppTheme.panelHeight, alignment: .top)
         .clipped()
-        .background(.regularMaterial)
+        .panelBackground()
         .tint(AppTheme.accent)
         .onAppear { store.prepareCatalog(); store.requestRefresh() }
     }
@@ -203,7 +227,7 @@ private struct PlayerHome: View {
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Configure o acesso ao YouTube Music para buscar e reproduzir.").font(.callout).foregroundStyle(.secondary)
-                        Button("Configurar acesso…") { store.go(to: .auth) }.buttonStyle(.borderedProminent)
+                        Button("Configurar acesso…") { store.go(to: .auth) }.glassProminentButton()
                     }
                     .transition(.opacity)
                 }
@@ -251,7 +275,7 @@ private struct PlayerHome: View {
                     .animation(AppTheme.swap, value: footerText)
                 Spacer()
                 Button("Sair") { store.stopAndQuit() }
-                    .buttonStyle(PressScaleStyle(scale: 0.96)).keyboardShortcut("q").font(.caption)
+                    .glassButton(fallback: PressScaleStyle(scale: 0.96)).keyboardShortcut("q").font(.caption)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -314,7 +338,7 @@ private struct CatalogList: View {
                         Text("A sessão do YouTube Music expirou.").font(.callout).foregroundStyle(.orange)
                         Text("Reconecte para carregar a biblioteca.").font(.caption).foregroundStyle(.secondary)
                         Button("Reconectar") { store.go(to: .auth) }
-                            .buttonStyle(.borderedProminent).tint(AppTheme.accent).padding(.top, 2)
+                            .glassProminentButton().tint(AppTheme.accent).padding(.top, 2)
                     } else {
                         Text(store.catalogMessage ?? emptyHint).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
@@ -708,6 +732,33 @@ private struct Transport: View {
     var body: some View {
         HStack(spacing: 10) {
             IconButton(systemName: "backward.fill", size: 32, isDisabled: snapshot == nil, help: "Anterior", action: store.previous)
+            playButton
+            IconButton(systemName: "forward.fill", size: 32, isDisabled: snapshot?.hasNext != true, help: "Próxima", action: store.next)
+            IconButton(
+                systemName: "dot.radiowaves.left.and.right",
+                size: 32,
+                isDisabled: snapshot == nil,
+                help: "Rádio a partir desta faixa",
+                action: { store.startRadio() }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var playButton: some View {
+        if #available(macOS 26.0, *) {
+            Button(action: store.togglePlayback) {
+                Image(systemName: snapshot?.isPaused == false ? "pause.fill" : "play.fill")
+                    .font(.body.weight(.semibold))
+                    .contentTransition(.symbolEffect(.replace.downUp))
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.glassProminent)
+            .buttonBorderShape(.circle)
+            .tint(AppTheme.accent)
+            .disabled(snapshot == nil)
+            .help(snapshot?.isPaused == false ? "Pausar" : "Reproduzir")
+        } else {
             Button(action: store.togglePlayback) {
                 Image(systemName: snapshot?.isPaused == false ? "pause.fill" : "play.fill")
                     .font(.body.weight(.semibold))
@@ -727,14 +778,6 @@ private struct Transport: View {
             .onHover { playHover.isHovering = $0 }
             .animation(AppTheme.hover, value: playHover.isHovering)
             .help(snapshot?.isPaused == false ? "Pausar" : "Reproduzir")
-            IconButton(systemName: "forward.fill", size: 32, isDisabled: snapshot?.hasNext != true, help: "Próxima", action: store.next)
-            IconButton(
-                systemName: "dot.radiowaves.left.and.right",
-                size: 32,
-                isDisabled: snapshot == nil,
-                help: "Rádio a partir desta faixa",
-                action: { store.startRadio() }
-            )
         }
     }
 }
@@ -848,7 +891,7 @@ struct AuthSetupView: View {
                         Button(signIn.isPresenting ? "Janela de login aberta…" : "Entrar com o Google") {
                             signIn.present { header in saveFromSignIn(header) }
                         }
-                        .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                        .glassProminentButton().tint(AppTheme.accent)
                         .disabled(draft.isSaving || signIn.isPresenting)
                         Spacer()
                     }
@@ -860,7 +903,7 @@ struct AuthSetupView: View {
                         .font(.caption)
                     HStack(spacing: 8) {
                         Button("Importar da área de transferência") { importFromClipboard() }
-                            .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                            .glassProminentButton().tint(AppTheme.accent)
                             .disabled(draft.isSaving)
                         Text("ou cole manualmente abaixo").font(.caption).foregroundStyle(.secondary)
                         Spacer()
@@ -885,11 +928,11 @@ struct AuthSetupView: View {
                 Spacer()
                 if draft.succeeded {
                     Button("Concluir") { onDone() }
-                        .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                        .glassProminentButton().tint(AppTheme.accent)
                         .keyboardShortcut(.defaultAction)
                 } else {
                     Button(draft.isSaving ? "Salvando…" : "Salvar e testar") { save() }
-                        .buttonStyle(.borderedProminent).tint(AppTheme.accent)
+                        .glassProminentButton().tint(AppTheme.accent)
                         .disabled(draft.isSaving || draft.headers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }

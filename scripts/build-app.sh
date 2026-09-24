@@ -38,6 +38,11 @@ if [[ -e "$app_path/Contents/Resources/.ytmusic-venv" ]]; then
     mv "$app_path/Contents/Resources/.ytmusic-venv" "${TMPDIR:-/tmp}/ytmusicbar-stale-venv-$$"
 fi
 cp "$binary_dir/YTMusicBar" "$app_path/Contents/MacOS/YTMusicBar"
+# SwiftPM stamps the deployment target as the SDK version; without the real SDK
+# macOS runs the app in compatibility mode (no Liquid Glass). Must run before codesign.
+binary="$app_path/Contents/MacOS/YTMusicBar"
+minos="$(xcrun vtool -show-build "$binary" | awk '/minos/{print $2}')"
+xcrun vtool -set-build-version macos "$minos" "$(xcrun --show-sdk-version)" -replace -output "$binary" "$binary"
 cp README.md "$app_path/Contents/Resources/README.md"
 cp Assets/YTMusicBar.png "$app_path/Contents/Resources/YTMusicBar.png"
 cp scripts/ytmusic_bridge.py "$app_path/Contents/Resources/ytmusic_bridge.py"
