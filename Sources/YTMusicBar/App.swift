@@ -8,6 +8,9 @@ enum AppTheme {
     /// The popover keeps one fixed size on every page so it never jumps when navigating.
     static let panelWidth: CGFloat = 420
     static let panelHeight: CGFloat = 680
+    static let panelPadding: CGFloat = 16
+    static var contentWidth: CGFloat { panelWidth - (panelPadding * 2) }
+    static var contentHeight: CGFloat { panelHeight - (panelPadding * 2) }
     static let hover = Animation.easeOut(duration: 0.15)
     static let swap = Animation.easeInOut(duration: 0.3)
 }
@@ -155,7 +158,8 @@ struct PlayerPanel: View {
             case .auth: AuthSetupView(store: store) { store.go(to: .player) }.transition(pageTransition)
             }
         }
-        .padding(16)
+        .frame(width: AppTheme.contentWidth, height: AppTheme.contentHeight, alignment: .top)
+        .padding(AppTheme.panelPadding)
         .frame(width: AppTheme.panelWidth, height: AppTheme.panelHeight, alignment: .top)
         .clipped()
         .panelBackground()
@@ -197,12 +201,96 @@ private struct PanelHeader: View {
     }
 }
 
-// MARK: - Player page
+private struct SearchBar: View {
+    @ObservedObject var store: PlayerStore
+    @ObservedObject var draft: TextDraft
+    @StateObject private var hover = HoverState()
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Buscar músicas ou artistas", text: $draft.text)
+                .textFieldStyle(.plain)
+                .onSubmit { store.search(draft.text) }
+            if !draft.text.isEmpty {
+                IconButton(systemName: "xmark.circle.fill", font: .caption, size: 20, help: "Limpar busca") {
+                    draft.text = ""; store.clearSearch()
+                }
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(.quaternary.opacity(hover.isHovering ? 0.7 : 0.5), in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onHover { hover.isHovering = $0 }
+        .animation(AppTheme.hover, value: hover.isHovering)
+        .animation(.snappy(duration: 0.2), value: draft.text.isEmpty)
+    }
+}
+
+/// An NSSegmentedControl whose segments distribute equally to fill the entire available width.
+private struct SegmentedTabs: NSViewRepresentable {
+    let tabs: [CatalogTab]
+    @Binding var selection: CatalogTab
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl()
+        control.segmentDistribution = .fillEqually
+        control.trackingMode = .selectOne
+        control.target = context.coordinator
+        control.action = #selector(Coordinator.segmentSelected(_:))
+        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        updateSegments(control)
+        return control
+    }
+
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.parent = self
+        updateSegments(control)
+    }
+
+    private func updateSegments(_ control: NSSegmentedControl) {
+        if control.segmentDistribution != .fillEqually {
+            control.segmentDistribution = .fillEqually
+        }
+        if control.segmentCount != tabs.count {
+            control.segmentCount = tabs.count
+        }
+        for (i, tab) in tabs.enumerated() {
+            if control.label(forSegment: i) != tab.title {
+                control.setLabel(tab.title, forSegment: i)
+            }
+        }
+        if let index = tabs.firstIndex(of: selection) {
+            if control.selectedSegment != index {
+                control.selectedSegment = index
+            }
+        } else {
+            control.selectedSegment = -1
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var parent: SegmentedTabs
+        init(_ parent: SegmentedTabs) { self.parent = parent }
+
+        @objc func segmentSelected(_ sender: NSSegmentedControl) {
+            let index = sender.selectedSegment
+            guard index >= 0, index < parent.tabs.count else { return }
+            let newTab = parent.tabs[index]
+            if parent.selection != newTab {
+                parent.selection = newTab
+            }
+        }
+    }
+}
 
 private struct PlayerHome: View {
     @ObservedObject var store: PlayerStore
     @StateObject private var draft = TextDraft()
-    @StateObject private var searchHover = HoverState()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -241,29 +329,11 @@ private struct PlayerHome: View {
 
             Divider()
 
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Buscar músicas ou artistas", text: $draft.text)
-                    .textFieldStyle(.plain)
-                    .onSubmit { store.search(draft.text) }
-                if !draft.text.isEmpty {
-                    IconButton(systemName: "xmark.circle.fill", font: .caption, size: 20, help: "Limpar busca") {
-                        draft.text = ""; store.clearSearch()
-                    }
-                    .transition(.scale.combined(with: .opacity))
-                }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(.quaternary.opacity(searchHover.isHovering ? 0.7 : 0.5), in: RoundedRectangle(cornerRadius: 8))
-            .onHover { searchHover.isHovering = $0 }
-            .animation(AppTheme.hover, value: searchHover.isHovering)
-            .animation(.snappy(duration: 0.2), value: draft.text.isEmpty)
+            SearchBar(store: store, draft: draft)
 
-            Picker("Seção", selection: $store.catalogTab) {
-                ForEach(store.availableTabs) { tab in Text(tab.title).tag(tab) }
-            }
-            .pickerStyle(.segmented).labelsHidden()
-            .animation(.snappy(duration: 0.25), value: store.availableTabs.count)
+            SegmentedTabs(tabs: store.availableTabs, selection: $store.catalogTab)
+                .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
+                .animation(.snappy(duration: 0.25), value: store.availableTabs.count)
 
             CatalogList(store: store)
                 .frame(maxHeight: .infinity)
