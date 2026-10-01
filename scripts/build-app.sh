@@ -75,3 +75,11 @@ PLIST
 
 codesign --force --sign - "$app_path"
 printf 'App criado: %s\n' "$app_path"
+
+install_path="/Applications/YTMusicBar.app"
+if [[ -w /Applications ]]; then
+    ditto "$app_path" "$install_path"
+    printf 'Instalado em: %s\n' "$install_path"
+else
+    printf 'Sem permissão de escrita em /Applications; app ficou só em %s\n' "$app_path" >&2
+fi

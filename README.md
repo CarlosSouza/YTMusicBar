@@ -35,7 +35,7 @@ bash scripts/build-app.sh
 open dist/YTMusicBar.app
 ```
 
-The script produces an ad hoc signed app for local use. Public distribution still needs a Developer ID and notarization.
+The script produces an ad hoc signed app for local use and installs it over `/Applications/YTMusicBar.app` when that folder is writable. Public distribution still needs a Developer ID and notarization.
 
 SwiftPM stamps the deployment target (14.0) as the SDK version, which makes macOS run the app in compatibility mode with the old design. The build restamps the binary with the real SDK via `xcrun vtool` before codesigning, so on macOS 26 the menu bar popover adopts Liquid Glass automatically. The glass button styles are guarded by `#available(macOS 26.0, *)`, so macOS 14 and 15 keep the previous look.
 
