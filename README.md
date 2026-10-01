@@ -14,6 +14,7 @@ The catalog is queried through `ytmusicapi`'s local protocol. Playback uses a si
 - The Queue tab shows played tracks dimmed, the current one highlighted and the upcoming ones; clicking a row jumps to it.
 - Track name in the menu bar, with artwork, artist, album and progress in the popover.
 - Play/pause, previous (restarts the track after 3 s), next, drag to seek.
+- Shuffle toggle randomizes the upcoming queue, keeping played tracks in place, and restores the original order when turned off.
 - Like or unlike the current track, applied to the heart immediately and reconciled with the server in the background.
 - Save a playlist or album to the library from its context menu, and remove it from the Playlists tab, where everything already is the library.
 - mpv volume and mute.

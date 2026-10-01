@@ -11,6 +11,8 @@ public struct PlaybackSnapshot: Codable, Equatable, Sendable {
     public let volume: Double
     public let isMuted: Bool
     public let isLiked: Bool?
+    /// True while the rest of the queue is playing in a shuffled order.
+    public let isShuffled: Bool
     /// True while mpv holds the track but has not started producing audio yet, which is how long
     /// yt-dlp takes to resolve the stream. Nothing is playing, so the position must not advance.
     public let isPreparing: Bool
@@ -30,6 +32,7 @@ public struct PlaybackSnapshot: Codable, Equatable, Sendable {
         volume: Double,
         isMuted: Bool,
         isLiked: Bool? = nil,
+        isShuffled: Bool = false,
         isPreparing: Bool = false,
         pageURL: URL?,
         queueIndex: Int = 0,
@@ -46,6 +49,7 @@ public struct PlaybackSnapshot: Codable, Equatable, Sendable {
         self.volume = volume.isFinite ? min(max(volume, 0), 1) : 0
         self.isMuted = isMuted
         self.isLiked = isLiked
+        self.isShuffled = isShuffled
         self.isPreparing = isPreparing
         self.pageURL = pageURL
         self.queueIndex = max(0, queueIndex)
@@ -72,6 +76,8 @@ public enum PlaybackAction: Equatable, Sendable {
     case seek(to: Double)
     case setVolume(Double)
     case toggleMute
+    /// Shuffle the upcoming tracks of the queue, or put them back in order.
+    case setShuffle(Bool)
     /// Jump to a position of the current queue.
     case jump(to: Int)
 }

@@ -13,11 +13,13 @@ IPC socket plus a pid file are the source of truth for the mpv lifecycle.
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import fcntl
 import json
 import os
 import pathlib
+import random
 import re
 import shutil
 import signal
@@ -779,6 +781,53 @@ def unstick_audio_output() -> None:
         WATCHDOG_FILE.write_text(json.dumps(state), encoding="utf-8")
 
 
+def set_shuffle(enabled: bool) -> None:
+    """Shuffles the upcoming part of the queue, or restores it, keeping played tracks in place.
+
+    mpv only knows a whole-playlist shuffle, so the upcoming entries are rewritten in the
+    wanted order: removed from the end of the playlist, then appended back through the
+    queue list file. `queue.json` keeps the real playback order in `order`; while shuffled,
+    `ordered` holds the order to restore when shuffle is turned off again.
+    """
+    with player_lock():
+        playlist = mpv_get("playlist") or []
+        pos = mpv_get("playlist-pos")
+        if not isinstance(pos, int) or pos < 0:
+            return
+        ids = [video_id_from(str(entry.get("filename") or "")) for entry in playlist]
+        upcoming = ids[pos + 1:]
+        if len(upcoming) < 2 and enabled:
+            return
+        if enabled:
+            desired = random.sample(upcoming, len(upcoming))
+        else:
+            original = load_queue().get("ordered") or ids
+            remaining = collections.Counter(upcoming)
+            desired = []
+            for video_id in original:
+                if remaining.get(video_id):
+                    remaining[video_id] -= 1
+                    desired.append(video_id)
+            known = collections.Counter(original)
+            desired += [v for v in upcoming if not known[v]]
+        if desired != upcoming:
+            for index in range(len(playlist) - 1, pos, -1):
+                mpv_request(["playlist-remove", index])
+            QUEUE_LIST_FILE.write_text(
+                "\n".join(WATCH_URL.format(video_id) for video_id in desired) + "\n",
+                encoding="utf-8",
+            )
+            mpv_request(["loadlist", str(QUEUE_LIST_FILE), "append"], timeout=2.0)
+        queue = load_queue()
+        queue["order"] = ids[:pos + 1] + desired
+        queue["shuffle"] = enabled
+        if enabled:
+            queue["ordered"] = queue.get("ordered") or ids
+        else:
+            queue.pop("ordered", None)
+        save_queue(queue)
+
+
 def snapshot() -> dict[str, Any]:
     if not mpv_alive():
         return {"idle": True}
@@ -814,6 +863,7 @@ def snapshot() -> dict[str, Any]:
         "currentTime": duration if ended else (mpv_get("time-pos") or 0),
         "duration": duration,
         "paused": True if ended else bool(mpv_get("pause")),
+        "shuffle": bool(queue.get("shuffle")),
         # core-idle stays true while yt-dlp resolves the stream, so the UI can avoid faking progress.
         "preparing": bool(mpv_get("core-idle")) and not ended,
         "volume": (100 if volume is None else volume) / 100,
@@ -948,6 +998,8 @@ def handle(request: dict[str, Any]) -> None:
             toggle_playback()
         elif action == "previous":
             previous_track()
+        elif action == "shuffle":
+            set_shuffle(bool(request.get("value")))
         elif action == "jump":
             mpv_request(["playlist-play-index", int(request.get("value") or 0)])
             mpv_request(["set_property", "pause", False])

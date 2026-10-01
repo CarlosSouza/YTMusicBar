@@ -219,6 +219,8 @@ final class PlayerStore: ObservableObject {
 
     func ensurePlayerLoaded() { player.loadIfNeeded() }
     func togglePlayback() { perform(.togglePlayback) }
+    /// Shuffles the upcoming tracks, or puts them back in order when already shuffled.
+    func toggleShuffle() { perform(.setShuffle(!(snapshot?.isShuffled ?? false))) }
     func previous() { perform(.previous) }
     func next() { perform(.next) }
     func toggleMute() { perform(.toggleMute) }
@@ -327,6 +329,9 @@ final class PlayerStore: ObservableObject {
         actionTask = Task {
             do {
                 try await player.perform(action, currentID: snapshot?.videoID)
+                // A shuffle reorders the queue without changing its count, so drop the rows
+                // to make refresh() reload them instead of keeping the stale order.
+                if case .setShuffle = action { queueItems = [] }
                 try? await Task.sleep(for: .milliseconds(180))
                 await refresh()
             } catch is CancellationError {} catch { showAction(error.localizedDescription) }

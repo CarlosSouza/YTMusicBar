@@ -801,6 +801,14 @@ private struct Transport: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            IconButton(
+                systemName: "shuffle",
+                size: 32,
+                tint: snapshot?.isShuffled == true ? AppTheme.accent : nil,
+                isDisabled: snapshot == nil || (snapshot?.hasNext != true && snapshot?.isShuffled != true),
+                help: snapshot?.isShuffled == true ? "Desativar ordem aleatória" : "Ordem aleatória",
+                action: store.toggleShuffle
+            )
             IconButton(systemName: "backward.fill", size: 32, isDisabled: snapshot == nil, help: "Anterior", action: store.previous)
             playButton
             IconButton(systemName: "forward.fill", size: 32, isDisabled: snapshot?.hasNext != true, help: "Próxima", action: store.next)

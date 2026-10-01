@@ -90,6 +90,7 @@ final class LocalMusicPlayer: ObservableObject {
             volume: raw.volume ?? 1,
             isMuted: raw.muted ?? false,
             isLiked: raw.liked,
+            isShuffled: raw.shuffle ?? false,
             isPreparing: raw.preparing ?? false,
             pageURL: raw.url.flatMap(URL.init(string:)),
             queueIndex: raw.queueIndex ?? 0,
@@ -170,6 +171,7 @@ final class LocalMusicPlayer: ObservableObject {
         case .previous: request["action"] = "previous"
         case .next: request["action"] = "next"
         case .toggleMute: request["action"] = "toggleMute"
+        case .setShuffle(let enabled): request["action"] = "shuffle"; request["value"] = enabled
         case .seek(let value): request["action"] = "seek"; request["value"] = value
         case .setVolume(let value): request["action"] = "volume"; request["value"] = value
         case .jump(let index): request["action"] = "jump"; request["value"] = index
@@ -242,6 +244,7 @@ private struct LocalMusicBridge {
         let volume: Double?
         let muted: Bool?
         let liked: Bool?
+        let shuffle: Bool?
         let preparing: Bool?
         let queueIndex: Int?
         let queueCount: Int?
