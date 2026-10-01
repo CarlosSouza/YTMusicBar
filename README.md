@@ -58,7 +58,7 @@ The popover has Library and Playlists tabs; the Results tab appears after a sear
 
 The radio button next to the transport rebuilds the queue from the track playing now, and any song row offers the same action in its context menu. It asks for 150 tracks and YouTube usually returns more (around 200 in practice); the radio is rebuilt each time, so it differs between runs. The queue tops itself up before it runs out, so a radio keeps going.
 
-Player state lives in `~/Library/Application Support/YTMusicBar/` (`queue.json`, `queue.m3u`, `mpv.pid`, `player.lock`); the mpv IPC socket is `ytmusicbar-mpv.sock` in the user's temporary directory.
+Player state lives in `~/Library/Application Support/YTMusicBar/` (`queue.json`, `queue.m3u`, `mpv.pid`, `player.lock`, `watchdog.json`, `mpv.log`); the mpv IPC socket is `ytmusicbar-mpv.sock` in the user's temporary directory.
 
 ## Verify
 

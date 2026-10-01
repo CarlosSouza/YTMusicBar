@@ -48,6 +48,8 @@ QUEUE_FILE = APP_SUPPORT / "queue.json"
 QUEUE_LIST_FILE = APP_SUPPORT / "queue.m3u"
 PID_FILE = APP_SUPPORT / "mpv.pid"
 LOCK_FILE = APP_SUPPORT / "player.lock"
+WATCHDOG_FILE = APP_SUPPORT / "watchdog.json"
+LOG_FILE = APP_SUPPORT / "mpv.log"
 LEGACY_FILES = ("current-video-id", "current-track.json", "current-track-liked")
 MPV_BINARY = shutil.which("mpv") or "/opt/homebrew/bin/mpv"
 YTDLP_BINARY = shutil.which("yt-dlp") or "/opt/homebrew/bin/yt-dlp"
@@ -216,6 +218,8 @@ def selftest() -> int:
             return 1
     if not queue_race_check():
         return 1
+    if not unstick_check():
+        return 1
     print("BridgeSelfTest: OK")
     return 0
 
@@ -237,6 +241,53 @@ def queue_race_check() -> bool:
         return True
     finally:
         QUEUE_FILE = original
+
+
+def unstick_check() -> bool:
+    """A frozen time-pos while playing must trigger ao-reload once, then respect the cooldown."""
+    global WATCHDOG_FILE
+    original_file = WATCHDOG_FILE
+    original_get, original_request = mpv_get, mpv_request
+    props = {"time-pos": 0.001, "pause": False, "idle-active": False,
+             "core-idle": False, "paused-for-cache": False, "seeking": False}
+    sent: list[list[Any]] = []
+    try:
+        WATCHDOG_FILE = pathlib.Path(tempfile.mkdtemp()) / "watchdog.json"
+        globals()["mpv_get"] = lambda prop: props.get(prop)
+        globals()["mpv_request"] = lambda cmd, timeout=0.8: (sent.append(cmd), {"error": "success"})[1]
+        unstick_audio_output()
+        unstick_audio_output()  # still inside the threshold: no reload
+        if sent:
+            print("BridgeSelfTest: FAIL · ao-reload disparado antes do limiar")
+            return False
+        state = json.loads(WATCHDOG_FILE.read_text(encoding="utf-8"))
+        state["since"] -= UNSTICK_AFTER + 1
+        WATCHDOG_FILE.write_text(json.dumps(state), encoding="utf-8")
+        unstick_audio_output()
+        if sent != [["ao-reload"]]:
+            print(f"BridgeSelfTest: FAIL · time-pos congelado não disparou ao-reload: {sent}")
+            return False
+        state = json.loads(WATCHDOG_FILE.read_text(encoding="utf-8"))
+        state["since"] -= UNSTICK_AFTER + 1
+        WATCHDOG_FILE.write_text(json.dumps(state), encoding="utf-8")
+        unstick_audio_output()
+        if sent != [["ao-reload"]]:
+            print("BridgeSelfTest: FAIL · ao-reload ignorou o cooldown")
+            return False
+        props["pause"] = True  # a paused track must never trigger the watchdog
+        state = json.loads(WATCHDOG_FILE.read_text(encoding="utf-8"))
+        state["since"] -= UNSTICK_AFTER + 1
+        state["reloadAt"] = 0
+        WATCHDOG_FILE.write_text(json.dumps(state), encoding="utf-8")
+        unstick_audio_output()
+        if sent != [["ao-reload"]]:
+            print("BridgeSelfTest: FAIL · ao-reload disparou com a faixa pausada")
+            return False
+        return True
+    finally:
+        WATCHDOG_FILE = original_file
+        globals()["mpv_get"] = original_get
+        globals()["mpv_request"] = original_request
 
 
 # --------------------------------------------------------------------------- catalog
@@ -451,6 +502,9 @@ def ensure_mpv() -> None:
     args = [
         MPV_BINARY, "--no-video", "--force-window=no", "--audio-display=no",
         "--idle=yes", "--really-quiet", "--no-terminal",
+        # really-quiet covers the terminal; keep warnings and errors in the log file so
+        # audio device failures stay diagnosable after the fact.
+        "--msg-level=all=warn", f"--log-file={LOG_FILE}",
         f"--input-ipc-server={SOCKET_PATH}",
         "--ytdl-format=bestaudio/best",
         f"--script-opts=ytdl_hook-ytdl_path={YTDLP_BINARY}",
@@ -494,6 +548,7 @@ def stop_player() -> None:
         kill_owned_mpv()
         QUEUE_FILE.unlink(missing_ok=True)
         QUEUE_LIST_FILE.unlink(missing_ok=True)
+        WATCHDOG_FILE.unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- queue state
@@ -681,9 +736,53 @@ def load_queue_into_mpv(urls: list[str], start: int) -> None:
                 mpv_request(["playlist-move", count - len(before) + offset, offset])
 
 
+# Seconds playing with time-pos frozen before the audio output is treated as wedged.
+UNSTICK_AFTER = 3.0
+# ao-reload is audible, so a driver that stays wedged must not be reloaded on every poll.
+UNSTICK_COOLDOWN = 15.0
+
+
+def unstick_audio_output() -> None:
+    """Reopens mpv's audio output when the device dies without mpv noticing.
+
+    The same mpv runs for days, and on macOS the CoreAudio device is lost when the
+    device map changes (headphones, a monitor sleeping, Teams grabbing audio). mpv
+    never reopens it on its own: pause stays off and the demuxer caches the whole
+    track while time-pos freezes near zero, which looks like a track that plays a
+    second and then loads forever. `ao-reload` reopens the device and playback
+    resumes where it stopped.
+    """
+    pos = mpv_get("time-pos")
+    fine = (
+        pos is None
+        or mpv_get("pause") is not False
+        or mpv_get("idle-active") is True
+        or mpv_get("core-idle") is True
+        or mpv_get("paused-for-cache") is True
+        or mpv_get("seeking") is True
+    )
+    try:
+        state = json.loads(WATCHDOG_FILE.read_text(encoding="utf-8"))
+        if not isinstance(state, dict):
+            state = {}
+    except (OSError, ValueError):
+        state = {}
+    now = time.time()
+    if fine or pos != state.get("pos"):
+        state = {"pos": pos, "since": now, "reloadAt": state.get("reloadAt") or 0}
+    elif now - float(state.get("since") or now) >= UNSTICK_AFTER:
+        state["since"] = now
+        if now - float(state.get("reloadAt") or 0) >= UNSTICK_COOLDOWN:
+            mpv_request(["ao-reload"], timeout=2.0)
+            state["reloadAt"] = now
+    with contextlib.suppress(OSError):
+        WATCHDOG_FILE.write_text(json.dumps(state), encoding="utf-8")
+
+
 def snapshot() -> dict[str, Any]:
     if not mpv_alive():
         return {"idle": True}
+    unstick_audio_output()
     queue = load_queue()
     order: list[str] = queue.get("order") or []
     ended = mpv_get("idle-active") is True
